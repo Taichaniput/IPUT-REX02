@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# Django
+*.log
+db.sqlite3
+media/
+staticfiles/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environments
+.env
+.venv/
+venv/
+ENV/
+
+# Fonts (keep ipaexg.ttf, ignore others)
+fonts/*.ttf
+!fonts/ipaexg.ttf
+
+# Migrations
+*/migrations/*.pyc
+*/migrations/__pycache__/
+
+# Others
+*.bak
+*.swp
+*.swo

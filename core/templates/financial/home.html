@@ -1,0 +1,125 @@
+{% extends 'financial/base.html' %}
+
+{% block title %}企業検索 - EDINET財務データ分析{% endblock %}
+
+{% block content %}
+<h1>EDINET財務データ分析システム</h1>
+<p class="system-description">
+    上場企業の財務データ分析・予測・ポジショニングを統合的に提供します
+</p>
+
+<form method="get" class="search-form">
+    <input type="text" name="keyword" value="{{ keyword }}" 
+           placeholder="企業名またはEDINETコードを入力" autofocus>
+    <button type="submit" class="btn">検索</button>
+</form>
+
+{% if keyword %}
+    {% if companies %}
+        <h2>検索結果</h2>
+        <p class="result-count">{{ companies|length }}件の企業が見つかりました</p>
+        <ul class="company-list">
+            {% for company in companies %}
+            <li class="company-item">
+                <a href="{% url 'financial:company_detail' company.edinet_code %}" class="company-link">
+                    <div class="company-info">
+                        <strong class="company-name">{{ company.filer_name }}</strong>
+                        <span class="company-code">{{ company.edinet_code }}</span>
+                    </div>
+                    <span class="arrow">→</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <div class="no-results">
+            <p>「{{ keyword }}」に該当する企業が見つかりませんでした。</p>
+            <p class="search-hint">別のキーワードでお試しください。</p>
+        </div>
+    {% endif %}
+{% else %}
+    <div class="welcome-message">
+        <h2>使い方</h2>
+        <ol>
+            <li>企業名またはEDINETコードで検索</li>
+            <li>企業を選択すると、以下の分析結果が表示されます：
+                <ul>
+                    <li>財務データの時系列推移</li>
+                    <li>複数モデルによる将来予測</li>
+                    <li>業界内でのポジショニング分析</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+{% endif %}
+
+<style>
+.system-description {
+    color: #666;
+    font-size: 16px;
+    margin-bottom: 30px;
+    text-align: center;
+}
+.result-count {
+    color: #666;
+    margin: 10px 0;
+}
+.company-link {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+    width: 100%;
+    padding: 15px;
+}
+.company-link:hover {
+    background-color: #f0f7ff;
+}
+.company-info {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.company-name {
+    font-size: 18px;
+    color: #333;
+}
+.company-code {
+    font-size: 14px;
+    color: #666;
+}
+.arrow {
+    font-size: 20px;
+    color: #007bff;
+}
+.no-results {
+    text-align: center;
+    padding: 40px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    margin: 30px 0;
+}
+.search-hint {
+    color: #666;
+    font-size: 14px;
+    margin-top: 10px;
+}
+.welcome-message {
+    background-color: #e3f2fd;
+    padding: 30px;
+    border-radius: 8px;
+    margin: 30px 0;
+}
+.welcome-message h2 {
+    margin-top: 0;
+}
+.welcome-message ol {
+    margin-left: 20px;
+}
+.welcome-message ul {
+    margin-top: 10px;
+    margin-left: 20px;
+}
+</style>
+{% endblock %}
