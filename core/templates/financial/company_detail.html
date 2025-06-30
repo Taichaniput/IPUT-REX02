@@ -136,7 +136,26 @@
 <!-- 予測分析タブ -->
 <div id="predictions" class="tab-content">
     <h2>将来予測</h2>
-    {% if prediction_results %}
+    {% if show_login_prompt %}
+        <div class="login-required-section">
+            <div class="lock-icon">🔒</div>
+            <h3>ログインが必要です</h3>
+            <p>AI予測分析をご覧いただくには、アカウント登録（無料）またはログインが必要です。</p>
+            <div class="feature-preview">
+                <h4>🤖 この機能で分析できること:</h4>
+                <ul>
+                    <li>成長率モデルによる売上・利益の将来予測</li>
+                    <li>過去データに基づく年平均成長率の計算</li>
+                    <li>向こう3年間の業績予測値</li>
+                    <li>グラフによる視覚的なトレンド分析</li>
+                </ul>
+            </div>
+            <div class="login-buttons-detail">
+                <a href="{% url 'financial:register' %}" class="btn-primary">無料で新規登録</a>
+                <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
+            </div>
+        </div>
+    {% elif prediction_results %}
         <p class="prediction-note">
             成長率モデルによる予測結果を表示しています。
             過去の成長率の中央値を基に将来を予測しています。
@@ -182,7 +201,27 @@
 <!-- クラスタリングタブ -->
 <div id="clustering" class="tab-content">
     <h2>業界内ポジショニング</h2>
-    {% if cluster_info %}
+    {% if show_login_prompt %}
+        <div class="login-required-section">
+            <div class="lock-icon">🔒</div>
+            <h3>ログインが必要です</h3>
+            <p>業界内ポジショニング分析をご覧いただくには、アカウント登録（無料）またはログインが必要です。</p>
+            <div class="feature-preview">
+                <h4>📊 この機能で分析できること:</h4>
+                <ul>
+                    <li>主成分分析による企業の2次元マッピング</li>
+                    <li>類似企業のクラスタリング分析</li>
+                    <li>業界内での相対的な位置づけ</li>
+                    <li>同じ特性を持つ競合企業の発見</li>
+                    <li>企業規模・収益性による分類</li>
+                </ul>
+            </div>
+            <div class="login-buttons-detail">
+                <a href="{% url 'financial:register' %}" class="btn-primary">無料で新規登録</a>
+                <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
+            </div>
+        </div>
+    {% elif cluster_info %}
         <div class="cluster-overview">
             <p>各企業の最新データに基づく分析結果</p>
             <p class="data-year">当該企業のデータ年度: {{ cluster_info.company_year }}年</p>
@@ -456,6 +495,110 @@
 .company-code {
     color: #666;
     font-size: 14px;
+}
+
+/* ログイン必須セクション */
+.login-required-section {
+    text-align: center;
+    padding: 60px 40px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    border: 2px dashed #dee2e6;
+    margin: 20px 0;
+}
+
+.lock-icon {
+    font-size: 3rem;
+    margin-bottom: 20px;
+    opacity: 0.7;
+}
+
+.login-required-section h3 {
+    color: #495057;
+    margin-bottom: 15px;
+    font-size: 1.5rem;
+}
+
+.login-required-section p {
+    color: #6c757d;
+    font-size: 1.1rem;
+    margin-bottom: 30px;
+    line-height: 1.6;
+}
+
+.feature-preview {
+    background: white;
+    border-radius: 8px;
+    padding: 25px;
+    margin: 30px 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    text-align: left;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.feature-preview h4 {
+    color: #495057;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+}
+
+.feature-preview ul {
+    color: #6c757d;
+    line-height: 1.6;
+    padding-left: 20px;
+}
+
+.feature-preview li {
+    margin-bottom: 8px;
+}
+
+.login-buttons-detail {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 30px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    padding: 15px 30px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 123, 255, 0.4);
+    color: white;
+    text-decoration: none;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: #6c757d;
+    padding: 15px 30px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.btn-secondary:hover {
+    background: #f8f9fa;
+    border-color: #adb5bd;
+    color: #495057;
+    text-decoration: none;
+    transform: translateY(-1px);
 }
 </style>
 

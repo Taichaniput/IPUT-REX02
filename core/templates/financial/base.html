@@ -4,21 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}EDINET財務データ分析{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
             margin: 0;
-            padding: 20px;
+            padding: 0;
             background-color: #f5f5f5;
         }
-        .container {
+        .main-container {
             max-width: 1200px;
             margin: 0 auto;
             background-color: white;
             padding: 30px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            margin-bottom: 20px;
         }
         h1, h2 { color: #333; }
         .search-form {
@@ -106,7 +109,26 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- ナビゲーションバー -->
+    <nav class="bg-teal-500 text-white p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">
+                <a href="{% url 'financial:home' %}" class="text-white hover:text-teal-200">Growth Compass</a>
+            </h1>
+            <div class="space-x-4">
+                {% if user.is_authenticated %}
+                    <span class="text-teal-200">{{ user.username }}さん</span>
+                    <a href="{% url 'financial:profile' %}" class="text-white hover:text-teal-200">プロフィール</a>
+                    <a href="{% url 'financial:logout' %}" class="text-white hover:text-teal-200">ログアウト</a>
+                {% else %}
+                    <a href="{% url 'financial:login' %}" class="text-white hover:text-teal-200">ログイン</a>
+                    <a href="{% url 'financial:register' %}" class="text-white hover:text-teal-200">新規登録</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-container">
         {% block content %}{% endblock %}
     </div>
 </body>

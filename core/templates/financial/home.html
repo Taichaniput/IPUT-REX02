@@ -3,10 +3,29 @@
 {% block title %}企業検索 - EDINET財務データ分析{% endblock %}
 
 {% block content %}
-<h1>EDINET財務データ分析システム</h1>
-<p class="system-description">
-    上場企業の財務データ分析・予測・ポジショニングを統合的に提供します
-</p>
+<!-- メッセージ表示 -->
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">
+            {{ message }}
+        </div>
+    {% endfor %}
+{% endif %}
+
+<!-- ヒーローセクション -->
+<div class="hero-section">
+    <h1 class="hero-title">AIキャリアアナリスト『Growth Compass』</h1>
+    <p class="hero-subtitle">
+        データで拓く、君のキャリア。<br>
+        AIが企業の未来を予測し、あなたのキャリアプランに最適な一社を見つけ出す。
+    </p>
+    {% if not user.is_authenticated %}
+        <div class="hero-cta">
+            <a href="{% url 'financial:register' %}" class="cta-button primary">無料で始める</a>
+            <a href="{% url 'financial:login' %}" class="cta-button secondary">ログイン</a>
+        </div>
+    {% endif %}
+</div>
 
 <form method="get" class="search-form">
     <input type="text" name="keyword" value="{{ keyword }}" 
@@ -53,7 +72,156 @@
     </div>
 {% endif %}
 
+{% if not user.is_authenticated %}
+    <!-- 未ログイン時のメッセージ -->
+    <div class="login-prompt">
+        <h3>🔐 より詳細な分析を見るには</h3>
+        <p>企業の詳細な財務分析、AI予測、業界ポジショニングを確認するには<br>アカウント登録が必要です。</p>
+        <div class="login-buttons">
+            <a href="{% url 'financial:register' %}" class="login-btn register">新規登録（無料）</a>
+            <a href="{% url 'financial:login' %}" class="login-btn login">ログイン</a>
+        </div>
+    </div>
+{% endif %}
+
 <style>
+.hero-section {
+    text-align: center;
+    padding: 60px 0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    margin: -30px -30px 40px -30px;
+    border-radius: 8px 8px 0 0;
+    color: white;
+}
+
+.hero-title {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin-bottom: 20px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.hero-subtitle {
+    font-size: 1.2rem;
+    margin-bottom: 40px;
+    opacity: 0.9;
+    line-height: 1.6;
+}
+
+.hero-cta {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.cta-button {
+    padding: 15px 30px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+}
+
+.cta-button.primary {
+    background-color: #4fd1c5;
+    color: white;
+    box-shadow: 0 4px 15px rgba(79, 209, 197, 0.3);
+}
+
+.cta-button.primary:hover {
+    background-color: #38b2ac;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(79, 209, 197, 0.4);
+}
+
+.cta-button.secondary {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.cta-button.secondary:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+.login-prompt {
+    background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+    padding: 30px;
+    border-radius: 12px;
+    text-align: center;
+    margin: 40px 0;
+    border-left: 5px solid #e17055;
+}
+
+.login-prompt h3 {
+    margin-top: 0;
+    color: #2d3436;
+    font-size: 1.4rem;
+}
+
+.login-prompt p {
+    color: #636e72;
+    margin-bottom: 25px;
+    line-height: 1.6;
+}
+
+.login-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.login-btn {
+    padding: 12px 25px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.login-btn.register {
+    background-color: #00b894;
+    color: white;
+}
+
+.login-btn.register:hover {
+    background-color: #00a085;
+    transform: translateY(-1px);
+}
+
+.login-btn.login {
+    background-color: #0984e3;
+    color: white;
+}
+
+.login-btn.login:hover {
+    background-color: #0770c4;
+    transform: translateY(-1px);
+}
+
+.alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    border-left: 4px solid;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    border-color: #28a745;
+    color: #155724;
+}
+
+.alert-error {
+    background-color: #f8d7da;
+    border-color: #dc3545;
+    color: #721c24;
+}
+
 .system-description {
     color: #666;
     font-size: 16px;

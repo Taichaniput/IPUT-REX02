@@ -1,8 +1,12 @@
 # financial/views.py
 
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib.auth import login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 from django.db.models import Q, Max
-from .models import FinancialData, FinancialDataValidated
+from .models import FinancialData, FinancialDataValidated, UserProfile
+from .forms import UserRegistrationForm, UserProfileForm
 import pandas as pd
 import numpy as np
 import io
@@ -89,8 +93,9 @@ def company_detail(request, edinet_code):
         'company_name': company_name,
         'edinet_code': edinet_code,
         'financial_data': data_with_indicators,
-        'prediction_results': prediction_results,
-        'cluster_info': cluster_info,
+        'prediction_results': prediction_results if request.user.is_authenticated else {},
+        'cluster_info': cluster_info if request.user.is_authenticated else None,
+        'show_login_prompt': not request.user.is_authenticated,
     })
 
 
@@ -488,3 +493,46 @@ def get_feature_label(feature):
         'number_of_employees': '従業員数'
     }
     return labels.get(feature, feature)
+
+
+# 認証関連ビュー
+def register(request):
+    """ユーザー登録"""
+    if request.method == 'POST':
+        form = UserRegistrationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, 'アカウントが作成されました。')
+            return redirect('financial:profile')
+    else:
+        form = UserRegistrationForm()
+    
+    return render(request, 'registration/register.html', {'form': form})
+
+
+@login_required
+def profile(request):
+    """プロフィール表示・編集"""
+    profile, created = UserProfile.objects.get_or_create(user=request.user)
+    
+    if request.method == 'POST':
+        form = UserProfileForm(request.POST, instance=profile)
+        if form.is_valid():
+            form.save()
+            messages.success(request, 'プロフィールが更新されました。')
+            return redirect('financial:profile')
+    else:
+        form = UserProfileForm(instance=profile)
+    
+    return render(request, 'registration/profile.html', {
+        'form': form,
+        'profile': profile
+    })
+
+
+def logout_view(request):
+    """ログアウト処理"""
+    logout(request)
+    messages.success(request, 'ログアウトしました。')
+    return redirect('financial:home')

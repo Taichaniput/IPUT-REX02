@@ -1,0 +1,63 @@
+{% extends 'financial/base.html' %}
+
+{% block title %}ログイン - Growth Compass{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-6 py-8">
+    <div class="max-w-md mx-auto bg-white rounded-lg shadow-lg p-8">
+        <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">ログイン</h2>
+        
+        {% if form.errors %}
+            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+                ユーザー名またはパスワードが正しくありません。
+            </div>
+        {% endif %}
+        
+        <form method="post" class="space-y-4">
+            {% csrf_token %}
+            
+            <div>
+                <label for="{{ form.username.id_for_label }}" class="block text-sm font-medium text-gray-700">
+                    ユーザー名
+                </label>
+                {{ form.username }}
+            </div>
+
+            <div>
+                <label for="{{ form.password.id_for_label }}" class="block text-sm font-medium text-gray-700">
+                    パスワード
+                </label>
+                {{ form.password }}
+            </div>
+
+            <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300">
+                ログイン
+            </button>
+        </form>
+
+        <div class="text-center mt-6">
+            <p class="text-gray-600">
+                アカウントをお持ちでない方は
+                <a href="{% url 'financial:register' %}" class="text-teal-600 hover:text-teal-800 font-medium">新規登録</a>
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+    input[type="text"], input[type="password"] {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        transition: border-color 0.2s;
+    }
+    
+    input[type="text"]:focus, input[type="password"]:focus {
+        outline: none;
+        border-color: #14b8a6;
+        box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
+    }
+</style>
+{% endblock %}
