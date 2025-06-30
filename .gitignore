@@ -40,3 +40,6 @@ fonts/*.ttf
 *.bak
 *.swp
 *.swo
+
+.md
+!README.md
