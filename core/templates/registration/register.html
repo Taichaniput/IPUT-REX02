@@ -70,6 +70,29 @@
                         {{ form.password1.errors|first }}
                     </div>
                 {% endif %}
+                
+                <!-- パスワード要件ガイド -->
+                <div class="mt-2 text-xs text-gray-500">
+                    <p class="font-medium mb-1">パスワード要件:</p>
+                    <ul class="space-y-1" id="password-requirements">
+                        <li id="length-req" class="flex items-center">
+                            <span class="requirement-icon mr-1">○</span>
+                            8文字以上
+                        </li>
+                        <li id="common-req" class="flex items-center">
+                            <span class="requirement-icon mr-1">○</span>
+                            一般的なパスワードでない
+                        </li>
+                        <li id="numeric-req" class="flex items-center">
+                            <span class="requirement-icon mr-1">○</span>
+                            数字のみでない
+                        </li>
+                        <li id="similarity-req" class="flex items-center">
+                            <span class="requirement-icon mr-1">○</span>
+                            ユーザー情報と類似していない
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <div>
@@ -82,6 +105,12 @@
                         {{ form.password2.errors|first }}
                     </div>
                 {% endif %}
+                
+                <!-- パスワード一致チェック -->
+                <div id="password-match" class="mt-2 text-xs" style="display: none;">
+                    <span id="match-icon" class="mr-1">○</span>
+                    <span id="match-text">パスワードが一致しています</span>
+                </div>
             </div>
 
             <button type="submit" class="w-full bg-teal-500 hover:bg-teal-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300">
@@ -113,5 +142,105 @@
         border-color: #14b8a6;
         box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.1);
     }
+    
+    .requirement-met {
+        color: #10b981;
+    }
+    
+    .requirement-unmet {
+        color: #ef4444;
+    }
+    
+    .match-success {
+        color: #10b981;
+    }
+    
+    .match-error {
+        color: #ef4444;
+    }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const password1 = document.getElementById('{{ form.password1.id_for_label }}');
+    const password2 = document.getElementById('{{ form.password2.id_for_label }}');
+    const username = document.getElementById('{{ form.username.id_for_label }}');
+    const firstName = document.getElementById('{{ form.first_name.id_for_label }}');
+    const lastName = document.getElementById('{{ form.last_name.id_for_label }}');
+    
+    // 一般的なパスワードリスト（簡易版）
+    const commonPasswords = ['password', '123456', '123456789', 'qwerty', 'abc123', 'password123'];
+    
+    function checkPassword() {
+        if (!password1.value) return;
+        
+        const password = password1.value;
+        const userInfo = [username.value, firstName.value, lastName.value].filter(Boolean);
+        
+        // 長さチェック
+        updateRequirement('length-req', password.length >= 8);
+        
+        // 数字のみチェック
+        updateRequirement('numeric-req', !/^\d+$/.test(password));
+        
+        // 一般的なパスワードチェック
+        updateRequirement('common-req', !commonPasswords.some(common => 
+            password.toLowerCase().includes(common.toLowerCase())
+        ));
+        
+        // ユーザー情報との類似性チェック
+        const isSimilar = userInfo.some(info => 
+            info.length > 2 && password.toLowerCase().includes(info.toLowerCase())
+        );
+        updateRequirement('similarity-req', !isSimilar);
+    }
+    
+    function updateRequirement(id, met) {
+        const element = document.getElementById(id);
+        const icon = element.querySelector('.requirement-icon');
+        
+        if (met) {
+            element.classList.add('requirement-met');
+            element.classList.remove('requirement-unmet');
+            icon.textContent = '✓';
+        } else {
+            element.classList.add('requirement-unmet');
+            element.classList.remove('requirement-met');
+            icon.textContent = '✗';
+        }
+    }
+    
+    function checkPasswordMatch() {
+        const matchDiv = document.getElementById('password-match');
+        const matchIcon = document.getElementById('match-icon');
+        const matchText = document.getElementById('match-text');
+        
+        if (!password2.value) {
+            matchDiv.style.display = 'none';
+            return;
+        }
+        
+        matchDiv.style.display = 'block';
+        
+        if (password1.value === password2.value && password2.value.length > 0) {
+            matchDiv.classList.add('match-success');
+            matchDiv.classList.remove('match-error');
+            matchIcon.textContent = '✓';
+            matchText.textContent = 'パスワードが一致しています';
+        } else {
+            matchDiv.classList.add('match-error');
+            matchDiv.classList.remove('match-success');
+            matchIcon.textContent = '✗';
+            matchText.textContent = 'パスワードが一致しません';
+        }
+    }
+    
+    // イベントリスナー
+    password1.addEventListener('input', checkPassword);
+    password2.addEventListener('input', checkPasswordMatch);
+    username.addEventListener('input', checkPassword);
+    firstName.addEventListener('input', checkPassword);
+    lastName.addEventListener('input', checkPassword);
+});
+</script>
 {% endblock %}
