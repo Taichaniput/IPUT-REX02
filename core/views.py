@@ -503,7 +503,7 @@ def register(request):
         if form.is_valid():
             user = form.save()
             login(request, user)
-            messages.success(request, 'アカウントが作成されました。')
+            messages.success(request, 'アカウントが作成されました。プロフィール情報を入力してください。')
             return redirect('financial:profile')
     else:
         form = UserRegistrationForm()
@@ -515,19 +515,21 @@ def register(request):
 def profile(request):
     """プロフィール表示・編集"""
     profile, created = UserProfile.objects.get_or_create(user=request.user)
+    is_first_time = created or not any([profile.student_id, profile.university, profile.department])
     
     if request.method == 'POST':
         form = UserProfileForm(request.POST, instance=profile)
         if form.is_valid():
             form.save()
-            messages.success(request, 'プロフィールが更新されました。')
-            return redirect('financial:profile')
+            messages.success(request, 'プロフィールが更新されました。Growth Compassをお楽しみください！')
+            return redirect('financial:home')
     else:
         form = UserProfileForm(instance=profile)
     
     return render(request, 'registration/profile.html', {
         'form': form,
-        'profile': profile
+        'profile': profile,
+        'is_first_time': is_first_time
     })
 
 
