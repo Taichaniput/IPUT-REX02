@@ -27,6 +27,13 @@ import os
 from matplotlib.font_manager import FontProperties
 
 
+# Tavily availability check
+try:
+    from tavily import TavilyClient
+    TAVILY_AVAILABLE = True
+except ImportError:
+    TAVILY_AVAILABLE = False
+
 # 日本語フォント設定
 if platform.system() == 'Windows':
     plt.rcParams['font.family'] = 'MS Gothic'
@@ -35,6 +42,46 @@ else:
     FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts', 'ipaexg.ttf')
     plt.rcParams['font.family'] = 'IPAPGothic'
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def get_company_additional_info(company_name):
+    """企業の追加情報を外部ソース（Tavily Web Search）から取得"""
+    from django.conf import settings
+    
+    additional_info = {}
+
+    if not TAVILY_AVAILABLE:
+        additional_info['web_search_summary'] = "Tavilyライブラリがインストールされていません。"
+        return additional_info
+
+    if not settings.TAVILY_API_KEY:
+        additional_info['web_search_summary'] = "Tavily APIキーが設定されていません。"
+        return additional_info
+
+    try:
+        from tavily import TavilyClient
+        # Tavilyクライアントを初期化
+        tavily = TavilyClient(api_key=settings.TAVILY_API_KEY)
+        
+        # 検索クエリを工夫して、多角的な情報を要求
+        search_query = f"{company_name}の事業内容、強みと弱み、市場でのポジショニング、最近の重要なニュースについて包括的に調査し、要約してください。"
+        
+        # TavilyでWeb検索を実行
+        response = tavily.search(
+            query=search_query,
+            search_depth="advanced",
+            max_results=5
+        )
+        
+        # 結果を結合して一つのサマリーにする
+        summary = "\n".join([f"- {obj['content']}" for obj in response['results']])
+        additional_info['web_search_summary'] = summary if summary else "ウェブ検索で関連情報が見つかりませんでした。"
+
+    except Exception as e:
+        print(f"Tavily search error: {e}")
+        additional_info['web_search_summary'] = "ウェブ検索中にエラーが発生しました。"
+    
+    return additional_info
 
 
 def home(request):
@@ -89,12 +136,25 @@ def company_detail(request, edinet_code):
     # 3. クラスタリング分析
     cluster_info = get_company_cluster_info(edinet_code)
     
+    # 4. AI分析（ログインユーザーのみ）
+    ai_analysis = {}
+    if request.user.is_authenticated:
+        print(f"Starting AI analysis for {company_name}...")
+        print(f"Prediction results available: {bool(prediction_results)}")
+        print(f"Cluster info available: {bool(cluster_info)}")
+        ai_analysis = generate_comprehensive_ai_analysis(
+            company_name, edinet_code, financial_data, 
+            prediction_results, cluster_info
+        )
+        print(f"AI analysis completed with keys: {ai_analysis.keys()}")
+    
     return render(request, 'financial/company_detail.html', {
         'company_name': company_name,
         'edinet_code': edinet_code,
         'financial_data': data_with_indicators,
         'prediction_results': prediction_results if request.user.is_authenticated else {},
         'cluster_info': cluster_info if request.user.is_authenticated else None,
+        'ai_analysis': ai_analysis,
         'show_login_prompt': not request.user.is_authenticated,
     })
 
@@ -103,14 +163,27 @@ def perform_predictions(financial_data):
     """複数の予測モデルを実行"""
     results = {}
     
-    # データ準備
-    df = pd.DataFrame([{
-        'fiscal_year': fd.fiscal_year,
-        'net_sales': fd.net_sales,
-        'operating_income': fd.operating_income,
-        'net_income': fd.net_income,
-        'total_assets': fd.total_assets
-    } for fd in financial_data if fd.fiscal_year])
+    # データ準備 - financial_dataは[{'data': FinancialData, 'indicators': dict}, ...]形式
+    df_data = []
+    for item in financial_data:
+        if isinstance(item, dict) and 'data' in item:
+            fd = item['data']
+        else:
+            fd = item
+            
+        if fd.fiscal_year:
+            df_data.append({
+                'fiscal_year': fd.fiscal_year,
+                'net_sales': fd.net_sales,
+                'operating_income': fd.operating_income,
+                'net_income': fd.net_income,
+                'total_assets': fd.total_assets
+            })
+    
+    df = pd.DataFrame(df_data)
+    
+    if df.empty:
+        return results
     
     df = df.sort_values('fiscal_year')
     
@@ -129,23 +202,383 @@ def perform_predictions(financial_data):
         years = valid_data['fiscal_year'].values
         values = valid_data[metric].values / 100000000  # 億円単位
         
-        # 予測実行
-        predictions = predict_multiple_models(years, values)
+        # 3シナリオ予測実行
+        scenarios = predict_three_scenarios(years, values)
         
         # グラフ生成
-        chart = create_prediction_chart(
-            years, values, predictions,
-            f"{get_metric_label(metric)}の予測",
+        chart = create_scenario_chart(
+            years, values, scenarios,
+            f"{get_metric_label(metric)}の3シナリオ予測",
             get_metric_label(metric) + "（億円）"
         )
         
         results[metric] = {
-            'predictions': predictions,
+            'predictions': {
+                'scenarios': scenarios
+            },
             'chart': chart,
             'label': get_metric_label(metric)
         }
     
     return results
+
+
+def predict_three_scenarios(years, values):
+    """楽観・現状・悲観の3シナリオで予測"""
+    if len(values) < 2:
+        return None
+    
+    # 成長率を計算
+    growth_rates = []
+    for i in range(1, len(values)):
+        if values[i-1] > 0:
+            growth_rate = (values[i] / values[i-1]) - 1
+            growth_rates.append(growth_rate)
+    
+    if not growth_rates:
+        return None
+    
+    # 基本成長率と変動率
+    base_growth = np.median(growth_rates)
+    growth_volatility = np.std(growth_rates) if len(growth_rates) > 1 else 0.1
+    
+    # 3シナリオの成長率
+    optimistic_growth = base_growth + growth_volatility  # 楽観的
+    current_growth = base_growth  # 現状維持
+    pessimistic_growth = base_growth - growth_volatility  # 悲観的
+    
+    # 将来3年の予測値を計算
+    last_value = values[-1]
+    future_years = [years[-1] + i for i in range(1, 4)]
+    
+    scenarios = {
+        'optimistic': {
+            'growth_rate': optimistic_growth * 100,
+            'years': future_years,
+            'values': [last_value * ((1 + optimistic_growth) ** i) for i in range(1, 4)]
+        },
+        'current': {
+            'growth_rate': current_growth * 100,
+            'years': future_years,
+            'values': [last_value * ((1 + current_growth) ** i) for i in range(1, 4)]
+        },
+        'pessimistic': {
+            'growth_rate': pessimistic_growth * 100,
+            'years': future_years,
+            'values': [last_value * ((1 + pessimistic_growth) ** i) for i in range(1, 4)]
+        }
+    }
+    
+    return scenarios
+
+
+def create_scenario_chart(actual_years, actual_values, scenarios, title, ylabel):
+    """3シナリオ予測結果のグラフを生成"""
+    font_prop = FontProperties(fname=FONT_PATH)
+    
+    plt.figure(figsize=(12, 8))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    # 実績データ
+    plt.plot(actual_years, actual_values, 'o-', color='blue', 
+             linewidth=3, markersize=10, label='実績', zorder=3)
+    
+    # 各シナリオの予測線
+    colors = {'optimistic': '#28a745', 'current': '#17a2b8', 'pessimistic': '#ffc107'}
+    scenario_names = {'optimistic': '楽観', 'current': '現状', 'pessimistic': '悲観'}
+    
+    for scenario_name, scenario_data in scenarios.items():
+        if scenario_data:
+            plt.plot(scenario_data['years'], scenario_data['values'], 
+                    '-', color=colors[scenario_name], linewidth=3, 
+                    marker='s', markersize=8,
+                    label=f"{scenario_names[scenario_name]}（年率{scenario_data['growth_rate']:.1f}%）",
+                    zorder=2)
+    
+    plt.title(title, fontsize=16, fontweight='bold', fontproperties=font_prop)
+    plt.xlabel('年度', fontsize=12, fontproperties=font_prop)
+    plt.ylabel(ylabel, fontsize=12, fontproperties=font_prop)
+    plt.legend(loc='best', prop=font_prop, fontsize=11)
+    plt.grid(True, alpha=0.3)
+    
+    # 軸の数値フォント設定
+    ax = plt.gca()
+    for label in ax.get_xticklabels() + ax.get_yticklabels():
+        label.set_fontproperties(font_prop)
+    
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=100)
+    plt.close()
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode('utf-8')
+
+
+def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data, prediction_results, cluster_info):
+    """Gemini APIを使用して包括的な企業分析を生成"""
+    from django.conf import settings
+    
+    if not settings.GEMINI_API_KEY:
+        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
+    
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel(settings.GEMINI_MODEL)
+        
+        # Tavilyで追加情報を取得
+        additional_info = get_company_additional_info(company_name)
+        
+        # 財務データを整理
+        financial_summary = prepare_financial_summary(financial_data)
+        
+        # 予測データを整理
+        prediction_summary = prepare_prediction_summary(prediction_results)
+        
+        # クラスタデータを整理
+        cluster_summary = prepare_cluster_summary(cluster_info)
+        
+        # Geminiプロンプトを構築
+        prompt = build_comprehensive_analysis_prompt(
+            company_name, financial_summary, prediction_summary, 
+            cluster_summary, additional_info
+        )
+        
+        # Gemini APIに送信
+        response = model.generate_content(prompt)
+        
+        # レスポンスが正常に生成されているかチェック
+        if not response or not response.text:
+            return {"error": "Gemini APIからの応答がありません"}
+        
+        print(f"Gemini response received: {len(response.text)} characters")
+        
+        # レスポンスを構造化
+        structured_analysis = parse_structured_analysis(response.text)
+        
+        return structured_analysis
+        
+    except Exception as e:
+        print(f"AI analysis generation error: {e}")
+        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
+
+
+def create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info):
+    """API利用できない場合のフォールバック分析"""
+    analysis = {}
+    
+    # 基本的な財務分析
+    if financial_data:
+        # financial_dataは辞書のリスト形式 [{'data': FinancialData, 'indicators': dict}, ...]
+        if isinstance(financial_data[0], dict) and 'data' in financial_data[0]:
+            latest = financial_data[0]['data']
+        else:
+            # 直接FinancialDataオブジェクトの場合
+            latest = financial_data[0]
+        
+        net_sales = (latest.net_sales or 0) / 100000000
+        analysis['FINANCIAL_ANALYSIS'] = f"{company_name}は{latest.fiscal_year}年に売上高{net_sales:.1f}億円を記録。情報通信業界における企業として位置づけられています。"
+    else:
+        analysis['FINANCIAL_ANALYSIS'] = f"{company_name}の詳細な財務分析を表示するためには、API接続が必要です。"
+    
+    # シナリオ分析のフォールバック
+    analysis['GROWTH_SCENARIOS'] = {
+        'optimistic': "市場拡大と技術革新により成長が期待されます。",
+        'current': "現在のトレンドが継続すると予想されます。",
+        'pessimistic': "市場環境の変化により成長に課題が生じる可能性があります。"
+    }
+    
+    analysis['PROFIT_SCENARIOS'] = {
+        'optimistic': "効率化により収益性向上が期待されます。",
+        'current': "現在の収益構造が維持される見通しです。",
+        'pessimistic': "競争激化により収益性に圧力がかかる可能性があります。"
+    }
+    
+    # ポジショニング分析
+    if cluster_info:
+        analysis['POSITIONING_ANALYSIS'] = f"クラスタ{cluster_info['cluster_id']}に分類され、業界内での特定のポジションを占めています。"
+    else:
+        analysis['POSITIONING_ANALYSIS'] = "業界内でのポジショニング分析には追加データが必要です。"
+    
+    # 総括
+    analysis['SUMMARY'] = f"{company_name}は情報系学生にとって技術的な成長機会を提供する可能性がある企業です。詳細な分析にはAI機能をご利用ください。"
+    
+    return analysis
+
+
+def prepare_financial_summary(financial_data):
+    """財務データを要約"""
+    if not financial_data:
+        return "財務データなし"
+    
+    summary = []
+    for item in financial_data[:3]:  # 最新3年分
+        # itemが辞書の場合とFinancialDataオブジェクトの場合を処理
+        if isinstance(item, dict) and 'data' in item:
+            fd = item['data']
+        else:
+            fd = item
+            
+        net_sales = fd.net_sales or 0
+        net_income = fd.net_income or 0
+        summary.append(f"{fd.fiscal_year}年: 売上{net_sales/100000000:.1f}億円, 純利益{net_income/100000000:.1f}億円")
+    
+    return "\n".join(summary)
+
+
+def prepare_prediction_summary(prediction_results):
+    """予測データを要約"""
+    if not prediction_results:
+        return "予測データなし"
+    
+    summary = []
+    for metric, result in prediction_results.items():
+        if 'scenarios' in result.get('predictions', {}):
+            scenarios = result['predictions']['scenarios']
+            summary.append(f"{result['label']}: 楽観{scenarios['optimistic']['growth_rate']:.1f}%, 現状{scenarios['current']['growth_rate']:.1f}%, 悲観{scenarios['pessimistic']['growth_rate']:.1f}%")
+    
+    return "\n".join(summary)
+
+
+def prepare_cluster_summary(cluster_info):
+    """クラスタデータを要約"""
+    if not cluster_info:
+        return "クラスタデータなし"
+    
+    summary = f"当該企業はクラスタ{cluster_info['cluster_id']}/{cluster_info['total_clusters']}に分類\n"
+    
+    # クラスタの特徴
+    if 'cluster_characteristics' in cluster_info:
+        summary += "クラスタの特徴:\n"
+        for feat, data in cluster_info['cluster_characteristics'].items():
+            feat_label = get_feature_label(feat)
+            summary += f"- {feat_label}: 全体平均比{data['relative']:.1f}%\n"
+    
+    # 同じクラスタの企業
+    if 'same_cluster_companies' in cluster_info:
+        companies = [comp['name'] for comp in cluster_info['same_cluster_companies'][:5]]
+        summary += f"\n同クラスタの類似企業: {', '.join(companies)}\n"
+    
+    # PCA解釈情報
+    if 'pca_interpretation' in cluster_info:
+        summary += "\n主成分分析による解釈:\n"
+        for comp in cluster_info['pca_interpretation']:
+            summary += f"- 第{comp['component']}主成分({comp['meaning']}): 寄与率{comp['variance_ratio']:.1f}%\n"
+    
+    return summary
+
+
+def build_comprehensive_analysis_prompt(company_name, financial_summary, prediction_summary, cluster_summary, additional_info):
+    """包括的分析用のプロンプトを構築"""
+    prompt = f"""
+あなたは情報系学生の就活支援を専門とする企業分析アナリストです。以下の企業について、構造化された分析を行ってください。
+
+## 分析対象企業
+{company_name}
+
+## 財務データ
+{financial_summary}
+
+## 成長予測（3シナリオ）
+{prediction_summary}
+
+## 業界ポジショニング・クラスタリング分析
+{cluster_summary}
+
+## 外部情報（Tavily検索結果）
+{additional_info.get('web_search_summary', 'なし')}
+
+## 指示
+上記データを統合して情報系学生向けの就活分析を行ってください。必ず以下の形式で出力してください。
+
+[FINANCIAL_ANALYSIS]
+財務データに基づく企業の特徴と健全性の簡潔な分析（100-150文字程度）
+[/FINANCIAL_ANALYSIS]
+
+[GROWTH_SCENARIOS_OPTIMISTIC]
+楽観シナリオの詳細な説明（市場拡大、新技術導入成功、デジタル変革などの要因）
+[/GROWTH_SCENARIOS_OPTIMISTIC]
+
+[GROWTH_SCENARIOS_CURRENT]
+現状シナリオの詳細な説明（現在のトレンド継続、安定成長）
+[/GROWTH_SCENARIOS_CURRENT]
+
+[GROWTH_SCENARIOS_PESSIMISTIC]
+悲観シナリオの詳細な説明（市場縮小、競合激化、技術的遅れなどのリスク）
+[/GROWTH_SCENARIOS_PESSIMISTIC]
+
+[PROFIT_SCENARIOS_OPTIMISTIC]
+収益性楽観シナリオの説明（効率化、高付加価値サービス拡大）
+[/PROFIT_SCENARIOS_OPTIMISTIC]
+
+[PROFIT_SCENARIOS_CURRENT]
+収益性現状シナリオの説明（現在の収益構造継続）
+[/PROFIT_SCENARIOS_CURRENT]
+
+[PROFIT_SCENARIOS_PESSIMISTIC]
+収益性悲観シナリオの説明（コスト増、価格競争激化）
+[/PROFIT_SCENARIOS_PESSIMISTIC]
+
+[POSITIONING_ANALYSIS]
+クラスタデータと同業他社比較に基づく業界内ポジショニング分析。企業の競合優位性、市場での立ち位置、技術力について詳述
+[/POSITIONING_ANALYSIS]
+
+[SUMMARY]
+情報系学生向けの就活への示唆。この企業のキャリア価値、技術的成長機会、業界トレンド、エンジニアとしてのキャリアパスについて総括
+[/SUMMARY]
+
+各セクションは具体的で実用的な内容にしてください。
+"""
+    return prompt
+
+
+def parse_structured_analysis(response_text):
+    """構造化された分析レスポンスを解析"""
+    sections = {}
+    
+    try:
+        # セクションを抽出
+        sections['FINANCIAL_ANALYSIS'] = extract_section(response_text, 'FINANCIAL_ANALYSIS')
+        
+        sections['GROWTH_SCENARIOS'] = {
+            'optimistic': extract_section(response_text, 'GROWTH_SCENARIOS_OPTIMISTIC'),
+            'current': extract_section(response_text, 'GROWTH_SCENARIOS_CURRENT'),
+            'pessimistic': extract_section(response_text, 'GROWTH_SCENARIOS_PESSIMISTIC')
+        }
+        
+        sections['PROFIT_SCENARIOS'] = {
+            'optimistic': extract_section(response_text, 'PROFIT_SCENARIOS_OPTIMISTIC'),
+            'current': extract_section(response_text, 'PROFIT_SCENARIOS_CURRENT'),
+            'pessimistic': extract_section(response_text, 'PROFIT_SCENARIOS_PESSIMISTIC')
+        }
+        
+        sections['POSITIONING_ANALYSIS'] = extract_section(response_text, 'POSITIONING_ANALYSIS')
+        sections['SUMMARY'] = extract_section(response_text, 'SUMMARY')
+        
+    except Exception as e:
+        print(f"Response parsing error: {e}")
+        sections = {"error": "レスポンス解析中にエラーが発生しました"}
+    
+    return sections
+
+
+def extract_section(text, section_name):
+    """テキストから指定されたセクションを抽出"""
+    start_tag = f"[{section_name}]"
+    end_tag = f"[/{section_name}]"
+    
+    start_index = text.find(start_tag)
+    if start_index == -1:
+        return "分析中..."
+    
+    start_index += len(start_tag)
+    end_index = text.find(end_tag, start_index)
+    
+    if end_index == -1:
+        return text[start_index:].strip()
+    
+    return text[start_index:end_index].strip()
 
 
 def predict_multiple_models(years, values):
