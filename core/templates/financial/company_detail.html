@@ -20,6 +20,7 @@
 <div class="tab-navigation">
     <button class="tab-button active" onclick="showTab('financial-data')">財務データ</button>
     <button class="tab-button" onclick="showTab('predictions')">予測分析</button>
+    <button class="tab-button" onclick="showTab('ai-analysis')">AI企業分析</button>
     <button class="tab-button" onclick="showTab('clustering')">ポジショニング</button>
 </div>
 
@@ -155,46 +156,72 @@
                 <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
             </div>
         </div>
-    {% elif prediction_results %}
-        <p class="prediction-note">
-            成長率モデルによる予測結果を表示しています。
-            過去の成長率の中央値を基に将来を予測しています。
-        </p>
-        
-        {% for metric, result in prediction_results.items %}
-        <div class="prediction-section">
-            <h3>{{ result.label }}の予測</h3>
-            <div class="chart-container">
-                <img src="data:image/png;base64,{{ result.chart }}" alt="{{ result.label }}予測グラフ">
+    {% else %}
+        {% if prediction_results %}
+            <div class="predictions-content">
+                {% for metric, result in prediction_results.items %}
+                    <div class="prediction-item">
+                        <h3>{{ result.label }}の予測</h3>
+                        <div class="chart-container">
+                            <img src="data:image/png;base64,{{ result.chart }}" alt="{{ result.label }}予測グラフ" class="prediction-chart">
+                        </div>
+                        <div class="prediction-details">
+                            {% for pred_type, pred_data in result.predictions.items %}
+                                <div class="prediction-model">
+                                    <h4>{{ pred_data.name }}</h4>
+                                    <p>年平均成長率: {{ pred_data.growth_rate|floatformat:1 }}%</p>
+                                    {% if pred_data.confidence %}
+                                        <p>信頼度: {{ pred_data.confidence }}</p>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endfor %}
             </div>
-            
-            <!-- 予測値のサマリー -->
-            {% if result.predictions.growth %}
-            <div class="prediction-summary">
-                <div class="model-result">
-                    <h4>予測結果</h4>
-                    <p class="growth-rate-info">
-                        年平均成長率: <strong>{{ result.predictions.growth.growth_rate|floatformat:1 }}%</strong>
-                    </p>
-                    <table class="prediction-table">
-                        <tr>
-                            {% for year in result.predictions.growth.years %}
-                            <th>{{ year }}年</th>
-                            {% endfor %}
-                        </tr>
-                        <tr>
-                            {% for value in result.predictions.growth.values %}
-                            <td>{{ value|floatformat:1 }}億円</td>
-                            {% endfor %}
-                        </tr>
-                    </table>
+        {% else %}
+            <div class="no-data">
+                <p>予測分析に必要なデータが不足しています。</p>
+            </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+<!-- AI企業分析タブ -->
+<div id="ai-analysis" class="tab-content">
+    <h2>AI企業分析</h2>
+    {% if show_login_prompt %}
+        <div class="login-required-section">
+            <div class="lock-icon">🔒</div>
+            <h3>ログインが必要です</h3>
+            <p>AI企業分析をご覧いただくには、アカウント登録（無料）またはログインが必要です。</p>
+            <div class="feature-preview">
+                <h4>🤖 この機能で分析できること:</h4>
+                <ul>
+                    <li>Googleの最新AI技術による深度のある企業分析</li>
+                    <li>財務データから読み取れる企業の強みと課題</li>
+                    <li>将来性や投資価値に関する総合的な評価</li>
+                    <li>業界内での競争優位性の分析</li>
+                    <li>経営陣の戦略や事業展開に関する洞察</li>
+                </ul>
+            </div>
+            <div class="login-buttons-detail">
+                <a href="{% url 'financial:register' %}" class="btn-primary">無料で新規登録</a>
+                <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
+            </div>
+        </div>
+    {% else %}
+        {% if ai_analysis %}
+            <div class="ai-analysis-content">
+                <div class="ai-analysis-text">
+                    {{ ai_analysis|linebreaks }}
                 </div>
             </div>
-            {% endif %}
-        </div>
-        {% endfor %}
-    {% else %}
-        <p class="no-data">予測に必要なデータが不足しています（3年以上のデータが必要）。</p>
+        {% else %}
+            <div class="no-data">
+                <p>AI分析データが利用できません。</p>
+            </div>
+        {% endif %}
     {% endif %}
 </div>
 
@@ -221,71 +248,43 @@
                 <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
             </div>
         </div>
-    {% elif cluster_info %}
-        <div class="cluster-overview">
-            <p>各企業の最新データに基づく分析結果</p>
-            <p class="data-year">当該企業のデータ年度: {{ cluster_info.company_year }}年</p>
-            <div class="cluster-badge">
-                クラスタ {{ cluster_info.cluster_id }} / {{ cluster_info.total_clusters }}
-            </div>
-        </div>
-
-        <div class="cluster-details">
-            <div class="cluster-chart">
-                <h3>主成分分析による企業マップ</h3>
-                <img src="data:image/png;base64,{{ cluster_info.chart }}" alt="クラスタ位置">
+    {% else %}
+        {% if cluster_info %}
+            <div class="clustering-content">
+                <div class="cluster-summary">
+                    <h3>クラスタ{{ cluster_info.cluster_id }} (全{{ cluster_info.total_clusters }}クラスタ中)</h3>
+                    <p>データ年度: {{ cluster_info.company_year }}年</p>
+                </div>
                 
-                <!-- PCA解釈 -->
-                <div class="pca-interpretation">
-                    <h4>軸の説明</h4>
-                    {% for comp in cluster_info.pca_interpretation %}
-                    <div class="pca-component">
-                        <strong>第{{ comp.component }}主成分（{{ comp.meaning }}）</strong>
-                        <span class="variance-ratio">寄与率: {{ comp.variance_ratio|floatformat:1 }}%</span>
-                        <ul class="feature-weights">
-                            {% for feat in comp.top_features %}
-                            <li>{{ feat.name }}: 
-                                {% if feat.weight > 0 %}正{% else %}負{% endif %}の影響
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
+                <div class="chart-container">
+                    <img src="data:image/png;base64,{{ cluster_info.chart }}" alt="クラスタリングマップ" class="cluster-chart">
+                </div>
+                
+                <div class="similar-companies">
+                    <h4>同じクラスタの企業</h4>
+                    <ul>
+                        {% for company in cluster_info.same_cluster_companies %}
+                            <li><a href="{% url 'financial:company_detail' company.code %}">{{ company.name }}</a> ({{ company.year }}年)</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                
+                <div class="cluster-characteristics">
+                    <h4>クラスタの特徴</h4>
+                    {% for feature, data in cluster_info.cluster_characteristics.items %}
+                        <div class="characteristic-item">
+                            <strong>{{ feature }}:</strong> 
+                            {{ data.value|floatformat:0 }} 
+                            (全体平均比: {{ data.relative|floatformat:1 }}%)
+                        </div>
                     {% endfor %}
                 </div>
             </div>
-
-            <div class="cluster-characteristics">
-                <h3>所属クラスタの特徴</h3>
-                <ul>
-                {% for feat, data in cluster_info.cluster_characteristics.items %}
-                    <li>
-                        <strong>{{ feat|get_feature_label }}</strong>: 
-                        全体平均と比較して
-                        <span class="{% if data.relative > 0 %}positive{% else %}negative{% endif %}">
-                            {{ data.relative|floatformat:1 }}%
-                        </span>
-                    </li>
-                {% endfor %}
-                </ul>
+        {% else %}
+            <div class="no-data">
+                <p>クラスタリング分析に必要なデータが不足しています。</p>
             </div>
-
-            {% if cluster_info.same_cluster_companies %}
-            <div class="similar-companies">
-                <h3>同じクラスタの企業</h3>
-                <ul>
-                {% for company in cluster_info.same_cluster_companies %}
-                    <li>
-                        <a href="{% url 'financial:company_detail' company.code %}">
-                            {{ company.name }} ({{ company.year }}年)
-                        </a>
-                    </li>
-                {% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-        </div>
-    {% else %}
-        <p class="no-data">クラスタリング分析に必要なデータが不足しています。</p>
+        {% endif %}
     {% endif %}
 </div>
 
@@ -600,9 +599,151 @@
     text-decoration: none;
     transform: translateY(-1px);
 }
+
+/* AI分析セクション */
+.ai-analysis-content {
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.analysis-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 25px;
+    text-align: center;
+}
+
+.analysis-header h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.4rem;
+}
+
+.analysis-note {
+    margin: 0;
+    opacity: 0.9;
+    font-size: 0.9rem;
+}
+
+.ai-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.analysis-body {
+    padding: 30px;
+    line-height: 1.8;
+    font-size: 1rem;
+    color: #333;
+    background: #fafafa;
+}
+
+.analysis-body p {
+    margin-bottom: 15px;
+}
+
+.analysis-footer {
+    padding: 20px 30px;
+    background: #f8f9fa;
+    border-top: 1px solid #e9ecef;
+}
+
+.disclaimer {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-style: italic;
+    text-align: center;
+}
+
+.ai-analysis-unavailable {
+    text-align: center;
+    padding: 40px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    color: #6c757d;
+}
+
+.ai-analysis-unavailable h3 {
+    color: #495057;
+    margin-bottom: 20px;
+}
+
+.ai-analysis-unavailable ul {
+    text-align: left;
+    max-width: 400px;
+    margin: 20px auto;
+    padding-left: 20px;
+}
+
+.ai-analysis-unavailable li {
+    margin-bottom: 8px;
+}
+
+/* ローディングセクション */
+.loading-section {
+    text-align: center;
+    padding: 60px 40px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid #e3f2fd;
+    border-top: 4px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading-section p {
+    color: #6c757d;
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+/* エラーセクション */
+.error-section {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.error-section h3 {
+    margin-top: 0;
+    color: #721c24;
+}
+
+/* 動的コンテンツセクション */
+.predictions-content,
+.clustering-content {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 </style>
 
 <script>
+// Data management variables removed - no AJAX loading needed
+
 function showTab(tabName) {
     // すべてのタブコンテンツを非表示
     const contents = document.getElementsByClassName('tab-content');
@@ -623,12 +764,17 @@ function showTab(tabName) {
     const activeButton = Array.from(buttons).find(
         button => button.textContent.includes(
             tabName === 'financial-data' ? '財務データ' :
-            tabName === 'predictions' ? '予測分析' : 'ポジショニング'
+            tabName === 'predictions' ? '予測分析' :
+            tabName === 'ai-analysis' ? 'AI企業分析' : 'ポジショニング'
         )
     );
     if (activeButton) {
         activeButton.classList.add('active');
     }
+    
+    // AJAX機能は無効化済み - 全データは初期読み込み時に取得
 }
+
+// AJAX functions removed - all data loaded synchronously
 </script>
 {% endblock %}

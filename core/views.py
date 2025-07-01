@@ -5,6 +5,9 @@ from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Q, Max
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_exempt
 from .models import FinancialData, FinancialDataValidated, UserProfile
 from .forms import UserRegistrationForm, UserProfileForm
 import pandas as pd
@@ -24,8 +27,28 @@ import warnings
 warnings.filterwarnings('ignore')
 import platform
 import os
+import unicodedata
+import re
+import hashlib
+from datetime import datetime, timedelta
+from django.core.cache import cache
+from django.conf import settings
 from matplotlib.font_manager import FontProperties
 
+# Google Gemini API
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+# 外部データ取得用
+import requests
+try:
+    from tavily import TavilyClient
+    TAVILY_AVAILABLE = True
+except ImportError:
+    TAVILY_AVAILABLE = False
 
 # 日本語フォント設定
 if platform.system() == 'Windows':
@@ -35,6 +58,133 @@ else:
     FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts', 'ipaexg.ttf')
     plt.rcParams['font.family'] = 'IPAPGothic'
 plt.rcParams['axes.unicode_minus'] = False
+
+# Gemini API初期化
+if GEMINI_AVAILABLE and settings.GEMINI_API_KEY:
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+
+
+def get_company_additional_info(company_name):
+    """企業の追加情報を外部ソース（Tavily Web Search）から取得"""
+    additional_info = {}
+
+    if not TAVILY_AVAILABLE:
+        additional_info['web_search_summary'] = "Tavilyライブラリがインストールされていません。"
+        return additional_info
+
+    if not settings.TAVILY_API_KEY:
+        additional_info['web_search_summary'] = "Tavily APIキーが設定されていません。"
+        return additional_info
+
+    try:
+        # Tavilyクライアントを初期化
+        tavily = TavilyClient(api_key=settings.TAVILY_API_KEY)
+        
+        # 検索クエリを工夫して、多角的な情報を要求
+        search_query = f"{company_name}の事業内容、強みと弱み、市場でのポジショニング、最近の重要なニュースについて包括的に調査し、要約してください。"
+        
+        # TavilyでWeb検索を実行
+        # search_depth="advanced"でより詳細な検索を行う
+        response = tavily.search(
+            query=search_query,
+            search_depth="advanced",
+            max_results=5  # 5つの検索結果を元に要約
+        )
+        
+        # 結果を結合して一つのサマリーにする
+        summary = "\n".join([f"- {obj['content']}" for obj in response['results']])
+        additional_info['web_search_summary'] = summary if summary else "ウェブ検索で関連情報が見つかりませんでした。"
+
+    except Exception as e:
+        print(f"Tavily search error: {e}")
+        additional_info['web_search_summary'] = "ウェブ検索中にエラーが発生しました。"
+    
+    return additional_info
+
+def generate_ai_company_analysis(company_name, financial_data, prediction_results, edinet_code):
+    """Gemini APIを使用して企業分析を生成"""
+    
+    if not GEMINI_AVAILABLE:
+        return "Google Generative AIライブラリがインストールされていません。"
+    
+    if not settings.GEMINI_API_KEY:
+        return "Google Gemini APIキーが設定されていません。環境変数GOOGLE_API_KEYを設定してください。"
+    
+    try:
+        # キャッシュキーの生成
+        cache_key = f"ai_analysis_{edinet_code}_{hash(str(prediction_results))}"
+        cached_analysis = cache.get(cache_key)
+        
+        if cached_analysis:
+            return cached_analysis
+        
+        # 企業の追加情報を取得
+        additional_info = get_company_additional_info(company_name)
+        
+        # 財務データの整理
+        latest_data = financial_data[0]['data'] if financial_data else None
+        financial_summary = ""
+        
+        if latest_data:
+            financial_summary = f"""
+            売上高: {latest_data.net_sales // 100000000 if latest_data.net_sales else 0}億円
+            営業利益: {latest_data.operating_income // 100000000 if latest_data.operating_income else 0}億円
+            純利益: {latest_data.net_income // 100000000 if latest_data.net_income else 0}億円
+            総資産: {latest_data.total_assets // 100000000 if latest_data.total_assets else 0}億円
+            """
+        
+        # 予測結果の整理
+        prediction_summary = ""
+        if prediction_results:
+            for metric, result in prediction_results.items():
+                if 'ml_universal' in result.get('predictions', {}):
+                    ml_pred = result['predictions']['ml_universal']
+                    prediction_summary += f"""
+                    {result['label']}のAI予測:
+                    - 年平均成長率: {ml_pred['growth_rate']:.1f}%
+                    - 予測信頼度: {ml_pred['confidence']}
+                    """
+        
+        # プロンプトの作成
+        prompt = f"""
+        【企業名】{company_name}
+        
+        【Web検索による企業情報サマリー】
+        {additional_info.get('web_search_summary', '情報なし')}
+        
+        【最新財務データ】{financial_summary}
+        
+        【AI予測分析】{prediction_summary}
+        
+        【分析要件】
+        1. 企業の事業内容と強みを簡潔に説明（Web検索結果を最重視）
+        2. 財務状況と成長性の客観的分析（財務データとAI予測を元に）
+        3. 情報系学生にとっての魅力と入社後のキャリア展望
+        4. 注意点やリスクがあれば客観的に言及
+        
+        【注意事項】
+        - 提示された情報を基に、客観的で正確な分析をしてください。
+        - 過度に楽観的な表現は避けてください。
+        - 就活生が意思決定に役立つ具体的な情報を提供してください。
+        - 全体で400-500文字程度でまとめてください。
+        
+        分析レポート：
+        """
+        
+        # Gemini APIに送信（フリー制限内でより利用しやすいモデル）
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        
+        analysis_result = response.text
+        
+        # キャッシュに保存（24時間）
+        cache.set(cache_key, analysis_result, timeout=settings.AI_ANALYSIS_CACHE_TIMEOUT)
+        
+        return analysis_result
+        
+    except Exception as e:
+        print(f"AI analysis generation error: {e}")
+        return "AI分析の生成中にエラーが発生しました。しばらく後に再度お試しください。"
 
 
 def home(request):
@@ -81,13 +231,31 @@ def company_detail(request, edinet_code):
             'indicators': indicators
         })
     
-    # 2. 予測分析（複数モデル）
+    # 2. 予測分析（複数モデル）- 直接読み込み
     prediction_results = {}
-    if len(financial_data) >= 3:
-        prediction_results = perform_predictions(financial_data)
+    if request.user.is_authenticated and len(financial_data) >= 3:
+        try:
+            prediction_results = perform_predictions(financial_data)
+        except Exception as e:
+            print(f"Prediction error: {e}")
     
-    # 3. クラスタリング分析
-    cluster_info = get_company_cluster_info(edinet_code)
+    # 3. クラスタリング分析 - 直接読み込み
+    cluster_info = None
+    if request.user.is_authenticated:
+        try:
+            cluster_info = get_company_cluster_info(edinet_code)
+        except Exception as e:
+            print(f"Clustering error: {e}")
+    
+    # 4. AI企業分析（ログインユーザーの場合のみ）
+    ai_analysis = None
+    if request.user.is_authenticated and settings.AI_ANALYSIS_ENABLED:
+        ai_analysis = generate_ai_company_analysis(
+            company_name, 
+            data_with_indicators, 
+            prediction_results, 
+            edinet_code
+        )
     
     return render(request, 'financial/company_detail.html', {
         'company_name': company_name,
@@ -95,6 +263,7 @@ def company_detail(request, edinet_code):
         'financial_data': data_with_indicators,
         'prediction_results': prediction_results if request.user.is_authenticated else {},
         'cluster_info': cluster_info if request.user.is_authenticated else None,
+        'ai_analysis': ai_analysis,
         'show_login_prompt': not request.user.is_authenticated,
     })
 
@@ -496,10 +665,19 @@ def get_company_cluster_info(edinet_code):
         # データ前処理
         df_filled = df.dropna(subset=FEATURES, how='all')
         df_filled[FEATURES] = df_filled[FEATURES].fillna(df_filled[FEATURES].median())
-        
+    
         if len(df_filled) < 3 or edinet_code not in df_filled.index:
             return None
-        
+    
+        # 外れ値除去（対象企業を含む場合のみ実行）
+        if edinet_code in df_filled.index:
+            q = df_filled[FEATURES].quantile(0.95)
+            mask = (df_filled[FEATURES] <= q).all(axis=1)
+            # 対象企業が除外される場合は外れ値除去をスキップ
+            if edinet_code not in df_filled[mask].index:
+                print(f"Warning: Outlier removal would exclude target company {edinet_code}, skipping")
+            else:
+                df_filled = df_filled[mask]
         # 標準化
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(df_filled[FEATURES])
@@ -507,7 +685,6 @@ def get_company_cluster_info(edinet_code):
         # PCAで次元削減（2次元）
         pca = PCA(n_components=2)
         X_pca = pca.fit_transform(X_scaled)
-        
         # クラスタリング
         kmeans = KMeans(n_clusters=3, random_state=42, n_init='auto')
         labels = kmeans.fit_predict(X_scaled)
@@ -773,3 +950,103 @@ def logout_view(request):
     logout(request)
     messages.success(request, 'ログアウトしました。')
     return redirect('financial:home')
+
+
+@require_http_methods(["GET"])
+def get_predictions_ajax(request, edinet_code):
+    """予測分析のAJAX取得"""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'ログインが必要です'}, status=401)
+    
+    try:
+        # 財務データ取得
+        financial_data = FinancialData.objects.filter(
+            edinet_code=edinet_code
+        ).select_related('document').order_by('-fiscal_year')
+        
+        if not financial_data.exists() or len(financial_data) < 3:
+            return JsonResponse({'error': '予測に必要なデータが不足しています'}, status=400)
+        
+        # 予測分析実行
+        prediction_results = perform_predictions(financial_data)
+        
+        # レスポンス用にデータを整理
+        response_data = {}
+        for metric, result in prediction_results.items():
+            response_data[metric] = {
+                'label': result['label'],
+                'chart': result['chart'],
+                'predictions': result['predictions']
+            }
+        
+        return JsonResponse({'predictions': response_data})
+        
+    except Exception as e:
+        return JsonResponse({'error': f'予測分析エラー: {str(e)}'}, status=500)
+
+
+@require_http_methods(["GET"])
+def get_clustering_ajax(request, edinet_code):
+    """クラスタリング分析のAJAX取得"""
+    # 一時的に認証チェックを無効化してテスト
+    # if not request.user.is_authenticated:
+    #     return JsonResponse({'error': 'ログインが必要です'}, status=401)
+    
+    try:
+        cluster_info = get_company_cluster_info(edinet_code)
+        
+        if not cluster_info:
+            return JsonResponse({'error': 'クラスタリング分析に必要なデータが不足しています'}, status=400)
+        
+        return JsonResponse({'cluster_info': cluster_info})
+        
+    except Exception as e:
+        return JsonResponse({'error': f'クラスタリング分析エラー: {str(e)}'}, status=500)
+
+
+@require_http_methods(["GET"])
+def get_ai_analysis_ajax(request, edinet_code):
+    """AI企業分析のAJAX取得"""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'ログインが必要です'}, status=401)
+    
+    if not settings.AI_ANALYSIS_ENABLED:
+        return JsonResponse({'error': 'AI分析機能が無効です'}, status=400)
+    
+    try:
+        # 基本的な財務データとメタデータ取得
+        financial_data = FinancialData.objects.filter(
+            edinet_code=edinet_code
+        ).select_related('document').order_by('-fiscal_year')
+        
+        if not financial_data.exists():
+            return JsonResponse({'error': '企業データが見つかりません'}, status=404)
+        
+        company_name = financial_data.first().filer_name
+        
+        # 財務指標を計算
+        data_with_indicators = []
+        for fd in financial_data:
+            indicators = calculate_financial_indicators(fd)
+            data_with_indicators.append({
+                'data': fd,
+                'indicators': indicators
+            })
+        
+        # 予測結果を取得（必要に応じて）
+        prediction_results = {}
+        if len(financial_data) >= 3:
+            prediction_results = perform_predictions(financial_data)
+        
+        # AI分析生成
+        ai_analysis = generate_ai_company_analysis(
+            company_name, 
+            data_with_indicators, 
+            prediction_results, 
+            edinet_code
+        )
+        
+        return JsonResponse({'ai_analysis': ai_analysis})
+        
+    except Exception as e:
+        return JsonResponse({'error': f'AI分析エラー: {str(e)}'}, status=500)
