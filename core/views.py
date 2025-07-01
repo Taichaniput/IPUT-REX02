@@ -24,6 +24,8 @@ import warnings
 warnings.filterwarnings('ignore')
 import platform
 import os
+import unicodedata
+import re
 from matplotlib.font_manager import FontProperties
 
 
@@ -37,15 +39,88 @@ else:
 plt.rcParams['axes.unicode_minus'] = False
 
 
+def normalize_search_string(text):
+    """検索文字列を正規化（全角半角、大文字小文字、カタカナひらがな対応）"""
+    if not text:
+        return text
+    
+    # 全角英数字を半角に変換
+    text = unicodedata.normalize('NFKC', text)
+    
+    # 大文字小文字を統一（小文字に）
+    text = text.lower()
+    
+    # カタカナをひらがなに変換
+    text = re.sub(r'[\u30A1-\u30F6]', lambda x: chr(ord(x.group()) - 0x60), text)
+    
+    # スペース、ハイフン、ピリオドなどを削除
+    text = re.sub(r'[\s\-\.\u3000]', '', text)
+    
+    return text
+
+
+def create_flexible_search_conditions(keyword):
+    """柔軟な検索条件を作成"""
+    conditions = Q()
+    
+    # 元のキーワードでの検索
+    conditions |= Q(edinet_code__icontains=keyword) | Q(filer_name__icontains=keyword)
+    
+    # 正規化されたキーワードでの検索
+    normalized_keyword = normalize_search_string(keyword)
+    if normalized_keyword != keyword:
+        conditions |= Q(edinet_code__icontains=normalized_keyword) | Q(filer_name__icontains=normalized_keyword)
+    
+    # 英数字の全角半角変換
+    if re.search(r'[A-Za-z0-9]', keyword):
+        # 半角→全角
+        fullwidth_keyword = keyword.translate(str.maketrans(
+            '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+            '０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ'
+        ))
+        conditions |= Q(edinet_code__icontains=fullwidth_keyword) | Q(filer_name__icontains=fullwidth_keyword)
+    
+    if re.search(r'[０-９Ａ-Ｚａ-ｚ]', keyword):
+        # 全角→半角
+        halfwidth_keyword = keyword.translate(str.maketrans(
+            '０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ',
+            '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+        ))
+        conditions |= Q(edinet_code__icontains=halfwidth_keyword) | Q(filer_name__icontains=halfwidth_keyword)
+    
+    # 大文字小文字バリエーション
+    upper_keyword = keyword.upper()
+    lower_keyword = keyword.lower()
+    if upper_keyword != keyword:
+        conditions |= Q(edinet_code__icontains=upper_keyword) | Q(filer_name__icontains=upper_keyword)
+    if lower_keyword != keyword:
+        conditions |= Q(edinet_code__icontains=lower_keyword) | Q(filer_name__icontains=lower_keyword)
+    
+    # カタカナ・ひらがな変換
+    if re.search(r'[\u3040-\u309F]', keyword):  # ひらがなが含まれる場合
+        # ひらがな→カタカナ
+        katakana_keyword = re.sub(r'[\u3040-\u309F]', lambda x: chr(ord(x.group()) + 0x60), keyword)
+        conditions |= Q(filer_name__icontains=katakana_keyword)
+    
+    if re.search(r'[\u30A0-\u30FF]', keyword):  # カタカナが含まれる場合
+        # カタカナ→ひらがな
+        hiragana_keyword = re.sub(r'[\u30A1-\u30F6]', lambda x: chr(ord(x.group()) - 0x60), keyword)
+        conditions |= Q(filer_name__icontains=hiragana_keyword)
+    
+    return conditions
+
+
 def home(request):
-    """企業検索画面"""
+    """企業検索画面（柔軟な検索対応）"""
     keyword = request.GET.get('keyword', '').strip()
     companies = []
     
     if keyword:
+        # 柔軟な検索条件を作成
+        search_conditions = create_flexible_search_conditions(keyword)
+        
         companies = FinancialData.objects.filter(
-            Q(edinet_code__icontains=keyword) |
-            Q(filer_name__icontains=keyword)
+            search_conditions
         ).values(
             'edinet_code', 'filer_name'
         ).distinct().order_by('filer_name')[:50]
