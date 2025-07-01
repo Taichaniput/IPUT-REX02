@@ -24,9 +24,17 @@ Thumbs.db
 
 # Environments
 .env
+.env.local
+.env.production
+.env.*.local
 .venv/
 venv/
 ENV/
+
+# API Keys and sensitive configuration
+config/local_settings.py
+*.key
+*.pem
 
 # Fonts (keep ipaexg.ttf, ignore others)
 fonts/*.ttf

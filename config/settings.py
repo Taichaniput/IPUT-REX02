@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -90,7 +94,7 @@ DATABASES = {
 }
 
 # EDINET API設定
-EDINET_API_KEY = os.environ.get('EDINET_API_KEY', 'YOUR_API_KEY_HERE')
+EDINET_API_KEY = os.environ.get('EDINET_API_KEY')
 
 # 既存パイプラインのパス
 EDINET_PIPELINE_PATH = EDINET_PIPELINE_PATH = os.path.join(BASE_DIR, '..')  
@@ -139,6 +143,16 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Google Gemini API設定
+GEMINI_API_KEY = os.environ.get('GOOGLE_API_KEY')
+GEMINI_MODEL = 'gemini-1.5-flash'
+
+# Tavily API設定
+TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY')
+
+# AI分析機能設定
+AI_ANALYSIS_ENABLED = True
+AI_ANALYSIS_CACHE_TIMEOUT = 86400  # 24時間
 import matplotlib as mpl
 
 # 日本語フォントファミリーを指定
