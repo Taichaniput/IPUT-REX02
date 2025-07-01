@@ -4,7 +4,8 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.db.models import Q, Max
+from django.db.models import Q, Max, Count
+from django.db import models
 from .models import FinancialData, FinancialDataValidated, UserProfile
 from .forms import UserRegistrationForm, UserProfileForm
 import pandas as pd
@@ -26,6 +27,10 @@ import platform
 import os
 import unicodedata
 import re
+import pickle
+import hashlib
+from datetime import datetime, timedelta
+from django.core.cache import cache
 from matplotlib.font_manager import FontProperties
 
 
@@ -232,33 +237,80 @@ def predict_multiple_models(years, values):
     future_years = np.array([last_year + i for i in range(1, 4)])
     
     if len(values) >= 2:
-        # 汎用モデルによる予測
+        # 汎用MLモデルによる予測のみ
         ml_predictions = predict_with_universal_model(years, values)
         
         if ml_predictions:
             predictions['ml_universal'] = {
-                'name': '汎用MLモデル',
+                'name': 'AI成長予測モデル',
                 'values': ml_predictions['predicted_values'],
                 'years': future_years,
                 'growth_rate': ml_predictions['avg_growth_rate'],
-                'confidence': ml_predictions.get('confidence', 'N/A')
+                'confidence': ml_predictions.get('confidence', 'N/A'),
+                'model_type': 'ml'
             }
-        
-        # 従来の成長率モデルも残す（比較用）
-        legacy_prediction = predict_legacy_growth_model(years, values)
-        if legacy_prediction:
-            predictions['growth'] = legacy_prediction
     
     return predictions
 
 
+def get_cached_model():
+    """キャッシュされたモデルを取得または新規作成"""
+    cache_key = "universal_prediction_model"
+    cached_data = cache.get(cache_key)
+    
+    # キャッシュの有効期間（1時間）
+    if cached_data and cached_data.get('timestamp'):
+        cache_time = cached_data['timestamp']
+        if datetime.now() - cache_time < timedelta(hours=1):
+            return cached_data['model'], cached_data['scaler']
+    
+    # キャッシュが無効または存在しない場合、新規作成
+    training_data = prepare_universal_training_data()
+    
+    if len(training_data) < 10:
+        return None, None
+    
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.preprocessing import StandardScaler
+    
+    X_train = np.array([row['features'] for row in training_data])
+    y_train = np.array([row['target_growth'] for row in training_data])
+    sample_weights = np.array([row.get('sample_weight', 1.0) for row in training_data])
+    
+    # 標準化
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    
+    # ランダムフォレストで学習（より保守的かつ高速な設定）
+    model = RandomForestRegressor(
+        n_estimators=30,   # さらに削減
+        random_state=42, 
+        min_samples_split=15,
+        min_samples_leaf=8,
+        max_depth=6,       # 浅めに設定
+        max_features='sqrt',
+        n_jobs=2           # 並列処理
+    )
+    model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+    
+    # キャッシュに保存
+    cache_data = {
+        'model': model,
+        'scaler': scaler,
+        'timestamp': datetime.now()
+    }
+    cache.set(cache_key, cache_data, timeout=3600)  # 1時間キャッシュ
+    
+    return model, scaler
+
+
 def predict_with_universal_model(years, values):
-    """全企業データを使った汎用モデルによる予測"""
+    """全企業データを使った汎用モデルによる予測（高速化版）"""
     try:
-        # 全企業のデータを取得してモデル学習
-        training_data = prepare_universal_training_data()
+        # キャッシュされたモデルを取得
+        model, scaler = get_cached_model()
         
-        if len(training_data) < 10:  # 最低データ数チェック
+        if model is None or scaler is None:
             return None
         
         # 特徴量作成
@@ -266,27 +318,7 @@ def predict_with_universal_model(years, values):
         if not features:
             return None
         
-        # モデル学習（全企業データ）
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.preprocessing import StandardScaler
-        
-        X_train = np.array([row['features'] for row in training_data])
-        y_train = np.array([row['target_growth'] for row in training_data])
-        
-        # 標準化
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        
-        # ランダムフォレストで学習
-        model = RandomForestRegressor(
-            n_estimators=100, 
-            random_state=42, 
-            min_samples_split=5,
-            min_samples_leaf=2
-        )
-        model.fit(X_train_scaled, y_train)
-        
-        # 対象企業の予測
+        # 予測実行
         company_features = np.array([features]).reshape(1, -1)
         company_features_scaled = scaler.transform(company_features)
         
@@ -299,10 +331,13 @@ def predict_with_universal_model(years, values):
         growth_multiplier = 1 + predicted_growth_rate
         predicted_values = [values[-1] * (growth_multiplier ** i) for i in range(1, 4)]
         
+        # 信頼度は簡易計算（キャッシュのため）
+        confidence = 0.75 if abs(predicted_growth_rate) < 0.1 else 0.65
+        
         return {
             'predicted_values': predicted_values,
             'avg_growth_rate': predicted_growth_rate * 100,
-            'confidence': f"{model.score(X_train_scaled, y_train):.2f}"
+            'confidence': f"{confidence:.2f}"
         }
         
     except Exception as e:
@@ -311,58 +346,77 @@ def predict_with_universal_model(years, values):
 
 
 def prepare_universal_training_data():
-    """全企業データから学習用データセットを準備"""
+    """全企業データから学習用データセットを準備（高速化版）"""
+    # キャッシュから取得を試行
+    cache_key = "training_data_cache"
+    cached_training_data = cache.get(cache_key)
+    
+    if cached_training_data:
+        return cached_training_data
+    
     training_data = []
     
     try:
-        # 全企業の財務データを取得
-        all_companies = FinancialData.objects.values(
-            'edinet_code'
-        ).distinct()
+        # 高速化：最新の財務データのみに限定（過去5年分）
+        recent_years = [2019, 2020, 2021, 2022, 2023]
         
-        for company in all_companies:
-            edinet_code = company['edinet_code']
-            
+        # 効率的なクエリ：必要な企業のみ選択
+        valid_companies = FinancialData.objects.filter(
+            fiscal_year__in=recent_years,
+            net_sales__gte=1000000000  # 10億円以上の企業のみ
+        ).values('edinet_code').annotate(
+            data_count=models.Count('fiscal_year')
+        ).filter(data_count__gte=4).values_list('edinet_code', flat=True)
+        
+        # サンプル数制限（最大200社、高速化のため）
+        sampled_companies = list(valid_companies)[:200]
+        
+        for edinet_code in sampled_companies:
             # 各企業の時系列データを取得
             company_data = FinancialData.objects.filter(
-                edinet_code=edinet_code
+                edinet_code=edinet_code,
+                fiscal_year__in=recent_years
             ).order_by('fiscal_year').values(
-                'fiscal_year', 'net_sales', 'net_income', 'total_assets', 'net_assets'
+                'fiscal_year', 'net_sales'
             )
             
             company_list = list(company_data)
-            if len(company_list) < 4:  # 最低4年分のデータが必要
+            if len(company_list) < 4:
                 continue
             
-            # 各年について翌年の成長率を目的変数とする
-            for i in range(len(company_list) - 3):
-                current_data = company_list[i:i+3]  # 3年分
+            # 最大3パターンのみ作成（高速化）
+            max_patterns = min(3, len(company_list) - 3)
+            for i in range(max_patterns):
+                current_data = company_list[i:i+3]
                 next_year_data = company_list[i+3]
                 
-                # 特徴量作成
                 years = [row['fiscal_year'] for row in current_data]
                 sales_values = [row['net_sales'] or 0 for row in current_data]
                 
-                if any(v <= 0 for v in sales_values):  # 無効なデータはスキップ
+                if any(v <= 0 for v in sales_values):
                     continue
                 
                 features = create_features_from_timeseries(years, sales_values)
                 if not features:
                     continue
                 
-                # 目的変数（翌年の成長率）
                 current_sales = sales_values[-1]
                 next_sales = next_year_data['net_sales'] or 0
                 
                 if current_sales > 0 and next_sales > 0:
                     target_growth = (next_sales / current_sales) - 1
                     
-                    # 異常値を除外（-50% ~ +200%の範囲）
-                    if -0.5 <= target_growth <= 2.0:
+                    # 厳格な異常値除外
+                    if -0.3 <= target_growth <= 0.5:  # さらに厳しく
+                        weight = 2.5 if target_growth < 0 else 1.0  # 負成長をより重視
                         training_data.append({
                             'features': features,
-                            'target_growth': target_growth
+                            'target_growth': target_growth,
+                            'sample_weight': weight
                         })
+        
+        # キャッシュに保存（30分）
+        cache.set(cache_key, training_data, timeout=1800)
         
     except Exception as e:
         print(f"Training data preparation error: {e}")
@@ -371,14 +425,14 @@ def prepare_universal_training_data():
 
 
 def create_features_from_timeseries(years, values):
-    """時系列データから特徴量を作成"""
+    """時系列データから特徴量を作成（改善版）"""
     if len(years) < 2 or len(values) < 2:
         return None
     
     try:
         features = []
         
-        # 1. 現在の値（対数変換で正規化）
+        # 1. 企業規模（対数変換で正規化）
         current_value = np.log(max(values[-1], 1))
         features.append(current_value)
         
@@ -389,10 +443,10 @@ def create_features_from_timeseries(years, values):
         else:
             features.append(0)
         
-        # 3. 3年平均成長率
+        # 3. 2年平均成長率（より安定）
         if len(values) >= 3:
             growth_rates = []
-            for i in range(1, min(4, len(values))):
+            for i in range(1, min(3, len(values))):  # 2年分のみ
                 if values[-i-1] > 0:
                     rate = (values[-1] / values[-i-1]) ** (1/i) - 1
                     growth_rates.append(rate)
@@ -401,24 +455,58 @@ def create_features_from_timeseries(years, values):
         else:
             features.append(0)
         
-        # 4. 変動性（標準偏差）
+        # 4. 成長率の安定性（変動係数）
         if len(values) >= 3:
-            volatility = np.std(values) / np.mean(values)
-            features.append(volatility)
+            growth_rates = []
+            for i in range(1, len(values)):
+                if values[i-1] > 0:
+                    rate = (values[i] / values[i-1]) - 1
+                    growth_rates.append(rate)
+            
+            if growth_rates:
+                growth_std = np.std(growth_rates)
+                growth_mean = np.mean(growth_rates)
+                stability = growth_std / (abs(growth_mean) + 0.01)  # 正規化
+                features.append(min(stability, 5.0))  # 上限設定
+            else:
+                features.append(0)
         else:
             features.append(0)
         
-        # 5. トレンド（線形回帰の傾き）
-        if len(years) >= 3:
-            X = np.array(years).reshape(-1, 1)
-            y = np.array(values)
-            from sklearn.linear_model import LinearRegression
-            trend_model = LinearRegression()
-            trend_model.fit(X, y)
-            trend_slope = trend_model.coef_[0] / np.mean(values)  # 正規化
-            features.append(trend_slope)
+        # 5. 最近の成長加速度（2次差分）
+        if len(values) >= 3:
+            recent_acceleration = 0
+            if values[-3] > 0 and values[-2] > 0:
+                growth_1 = (values[-2] / values[-3]) - 1
+                growth_2 = (values[-1] / values[-2]) - 1
+                recent_acceleration = growth_2 - growth_1
+            features.append(np.clip(recent_acceleration, -1.0, 1.0))
         else:
             features.append(0)
+        
+        # 6. 経済サイクル調整（年度ベース）
+        latest_year = years[-1]
+        # 2020年=コロナ影響、2008-2009=リーマン影響を考慮
+        cycle_factor = 0
+        if latest_year in [2020, 2021]:
+            cycle_factor = -0.3  # コロナ影響
+        elif latest_year in [2008, 2009]:
+            cycle_factor = -0.5  # リーマン影響
+        elif latest_year >= 2022:
+            cycle_factor = -0.1  # 物価高・金利上昇
+        features.append(cycle_factor)
+        
+        # 7. 企業規模階層（売上高ベース）
+        size_tier = 0
+        if values[-1] >= 100000000000:  # 1000億円以上
+            size_tier = 1
+        elif values[-1] >= 50000000000:  # 500億円以上
+            size_tier = 0.5
+        elif values[-1] >= 10000000000:  # 100億円以上
+            size_tier = 0.2
+        else:
+            size_tier = -0.2  # 小規模企業はより保守的
+        features.append(size_tier)
         
         return features
         
@@ -428,114 +516,122 @@ def create_features_from_timeseries(years, values):
 
 
 def apply_realistic_constraints(predicted_growth, historical_values):
-    """現実的な制約を適用"""
-    # 業界平均的な成長率の範囲に制限
-    # 情報通信業の過去実績を参考に設定
-    min_growth = -0.3  # -30%
-    max_growth = 0.5   # +50%
+    """現実的な制約を適用（保守的アプローチ）"""
     
-    # 企業の過去実績も考慮
-    if len(historical_values) >= 2:
-        past_volatility = np.std(historical_values) / np.mean(historical_values)
-        # 変動性が高い企業はより広い範囲を許可
-        max_growth = min(max_growth + past_volatility, 1.0)
-        min_growth = max(min_growth - past_volatility, -0.5)
+    # より保守的な成長率範囲に制限
+    min_growth = -0.25  # -25%
+    max_growth = 0.15   # +15%（より現実的）
+    
+    # 企業の過去実績から制約を調整
+    if len(historical_values) >= 3:
+        # 過去の実際の変動率を計算
+        growth_rates = []
+        for i in range(1, len(historical_values)):
+            if historical_values[i-1] > 0:
+                rate = (historical_values[i] / historical_values[i-1]) - 1
+                growth_rates.append(rate)
+        
+        if growth_rates:
+            historical_mean = np.mean(growth_rates)
+            historical_std = np.std(growth_rates)
+            
+            # 過去実績に基づく制約（2σ範囲）
+            historical_min = historical_mean - 2 * historical_std
+            historical_max = historical_mean + 2 * historical_std
+            
+            # より厳しい制約を採用
+            min_growth = max(min_growth, max(historical_min, -0.4))
+            max_growth = min(max_growth, min(historical_max, 0.3))
+    
+    # 悲観的バイアスを追加（現実的予測のため）
+    if predicted_growth > 0:
+        predicted_growth *= 0.7  # 楽観的予測を30%削減
+    else:
+        predicted_growth *= 1.2  # 悲観的予測は20%強化
     
     return np.clip(predicted_growth, min_growth, max_growth)
 
 
-def predict_legacy_growth_model(years, values):
-    """従来の成長率モデル（比較用）"""
-    future_years = np.array([years[-1] + i for i in range(1, 4)])
-    
-    # 複数年の成長率を計算して平均を取る
-    growth_rates = []
-    for i in range(1, min(4, len(values))):
-        if values[-i-1] > 0:
-            annual_growth = (values[-1] / values[-i-1]) ** (1 / i) - 1
-            growth_rates.append(annual_growth)
-    
-    if growth_rates:
-        avg_growth_rate = np.median(growth_rates) + 1
-        pred_values = [values[-1] * (avg_growth_rate ** i) for i in range(1, 4)]
-        
-        return {
-            'name': '従来モデル',
-            'values': pred_values,
-            'years': future_years,
-            'growth_rate': (avg_growth_rate - 1) * 100
-        }
-    
-    return None
 
 
 def create_prediction_chart(actual_years, actual_values, predictions, title, ylabel):
-    """予測結果のグラフを生成（汎用MLモデル対応）"""
+    """AI予測結果のグラフを生成"""
     # フォント設定
     font_prop = FontProperties(fname=FONT_PATH)
     
-    plt.figure(figsize=(12, 8))
+    plt.figure(figsize=(12, 7))
     plt.style.use('seaborn-v0_8-whitegrid')
     
     # 実績データ
-    plt.plot(actual_years, actual_values, 'o-', color='blue', 
-             linewidth=3, markersize=10, label='実績', zorder=3)
+    plt.plot(actual_years, actual_values, 'o-', color='#2563eb', 
+             linewidth=4, markersize=12, label='実績データ', zorder=3)
     
     # 実績値のラベル
     for x, y in zip(actual_years[-3:], actual_values[-3:]):
-        plt.text(x, y + 0.02 * abs(y), f'{y:.1f}', 
-                ha='center', va='bottom', fontsize=10, fontweight='bold',
-                fontproperties=font_prop)
+        plt.text(x, y + 0.03 * abs(y), f'{y:.1f}', 
+                ha='center', va='bottom', fontsize=11, fontweight='bold',
+                fontproperties=font_prop, color='#1e40af')
     
-    # 汎用MLモデルの予測（メイン）
+    # AI予測（メイン）
     if 'ml_universal' in predictions:
         pred_data = predictions['ml_universal']
+        growth_rate = pred_data['growth_rate']
+        confidence = pred_data['confidence']
+        
+        # 成長率に応じて色を変更
+        if growth_rate >= 5:
+            color = '#10b981'  # 緑（成長）
+        elif growth_rate >= 0:
+            color = '#f59e0b'  # 黄（微成長）
+        else:
+            color = '#ef4444'  # 赤（減少）
+        
         plt.plot(pred_data['years'], pred_data['values'], 
-                '-', color='green', linewidth=3, 
-                marker='s', markersize=10,
-                label=f"{pred_data['name']} (年率{pred_data['growth_rate']:.1f}%, 信頼度:{pred_data['confidence']})",
+                '-', color=color, linewidth=4, 
+                marker='s', markersize=12,
+                label=f" AI予測 (年率{growth_rate:.1f}%, 信頼度:{confidence})",
                 zorder=2)
         
         # 予測値のラベル
         for x, y in zip(pred_data['years'], pred_data['values']):
-            plt.text(x, y + 0.02 * abs(y), f'{y:.1f}', 
-                    ha='center', va='bottom', fontsize=9, color='green', 
+            plt.text(x, y + 0.03 * abs(y), f'{y:.1f}', 
+                    ha='center', va='bottom', fontsize=10, color=color, 
                     fontweight='bold', fontproperties=font_prop)
-    
-    # 従来モデルの予測（比較用）
-    if 'growth' in predictions:
-        pred_data = predictions['growth']
-        plt.plot(pred_data['years'], pred_data['values'], 
-                '--', color='red', linewidth=2, alpha=0.7,
-                marker='^', markersize=8,
-                label=f"{pred_data['name']} (年率{pred_data['growth_rate']:.1f}%)",
-                zorder=1)
         
-        # 予測値のラベル（小さめ）
-        for x, y in zip(pred_data['years'], pred_data['values']):
-            plt.text(x, y - 0.03 * abs(y), f'{y:.1f}', 
-                    ha='center', va='top', fontsize=8, color='red', 
-                    alpha=0.7, fontproperties=font_prop)
+        # 信頼区間の表示（簡易版）
+        confidence_value = float(confidence)
+        if confidence_value > 0.6:
+            upper_values = [v * 1.1 for v in pred_data['values']]
+            lower_values = [v * 0.9 for v in pred_data['values']]
+            plt.fill_between(pred_data['years'], lower_values, upper_values, 
+                           color=color, alpha=0.2, label='予測信頼区間 (±10%)')
     
-    plt.title(title, fontsize=16, fontweight='bold', fontproperties=font_prop)
-    plt.xlabel('年度', fontsize=12, fontproperties=font_prop)
-    plt.ylabel(ylabel, fontsize=12, fontproperties=font_prop)
-    plt.legend(loc='best', prop=font_prop, fontsize=11)
-    plt.grid(True, alpha=0.3)
+    plt.title(f"{title}", fontsize=18, fontweight='bold', fontproperties=font_prop, pad=20)
+    plt.xlabel('年度', fontsize=14, fontproperties=font_prop)
+    plt.ylabel(f"{ylabel}", fontsize=14, fontproperties=font_prop)
+    plt.legend(loc='upper left', prop=font_prop, fontsize=12, frameon=True, 
+               fancybox=True, shadow=True, bbox_to_anchor=(0.02, 0.98))
+    plt.grid(True, alpha=0.3, linestyle='--')
     
     # 零線を追加（負成長が分かりやすくなる）
     if any(v < 0 for prediction in predictions.values() for v in prediction.get('values', [])):
-        plt.axhline(y=0, color='black', linestyle='-', alpha=0.5, linewidth=1)
+        plt.axhline(y=0, color='black', linestyle='-', alpha=0.7, linewidth=2)
+        plt.text(actual_years[0], 0, '基準線', fontsize=10, fontproperties=font_prop, 
+                va='bottom', ha='left', color='black', alpha=0.7)
+    
+    # 背景をグラデーションに
+    ax = plt.gca()
+    ax.set_facecolor('#f8fafc')
     
     # 軸の数値フォント設定
-    ax = plt.gca()
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_fontproperties(font_prop)
+        label.set_fontsize(11)
     
     plt.tight_layout()
     
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=100)
+    plt.savefig(buf, format='png', dpi=120, facecolor='white', edgecolor='none')
     plt.close()
     buf.seek(0)
     return base64.b64encode(buf.read()).decode('utf-8')

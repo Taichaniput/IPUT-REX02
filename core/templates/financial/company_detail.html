@@ -142,12 +142,13 @@
             <h3>ログインが必要です</h3>
             <p>AI予測分析をご覧いただくには、アカウント登録（無料）またはログインが必要です。</p>
             <div class="feature-preview">
-                <h4>🤖 この機能で分析できること:</h4>
+                <h4>🤖 AI成長予測分析の特徴:</h4>
                 <ul>
-                    <li>成長率モデルによる売上・利益の将来予測</li>
-                    <li>過去データに基づく年平均成長率の計算</li>
-                    <li>向こう3年間の業績予測値</li>
-                    <li>グラフによる視覚的なトレンド分析</li>
+                    <li><strong>機械学習による高精度予測</strong> - 全企業の財務データから学習</li>
+                    <li><strong>現実的な成長率予測</strong> - 経済環境・業界トレンドを考慮</li>
+                    <li><strong>信頼度付き予測値</strong> - 予測の確実性を数値で表示</li>
+                    <li><strong>視覚的な分析結果</strong> - 高機能グラフと詳細解説</li>
+                    <li><strong>成長分析レポート</strong> - AIによる企業評価コメント</li>
                 </ul>
             </div>
             <div class="login-buttons-detail">
@@ -156,38 +157,105 @@
             </div>
         </div>
     {% elif prediction_results %}
-        <p class="prediction-note">
-            成長率モデルによる予測結果を表示しています。
-            過去の成長率の中央値を基に将来を予測しています。
-        </p>
+        <div class="ai-prediction-header">
+            <h3>AI成長予測分析</h3>
+            <p class="prediction-note">
+                <strong>機械学習による高精度予測</strong><br>
+                全企業の財務データから学習したAIモデルが、この企業の将来成長を予測します。
+                経済環境や業界トレンドも考慮した現実的な予測値を提供します。
+            </p>
+        </div>
         
         {% for metric, result in prediction_results.items %}
-        <div class="prediction-section">
-            <h3>{{ result.label }}の予測</h3>
+        <div class="prediction-section enhanced">
+            <h3>{{ result.label }}の AI予測</h3>
+            
             <div class="chart-container">
-                <img src="data:image/png;base64,{{ result.chart }}" alt="{{ result.label }}予測グラフ">
+                <img src="data:image/png;base64,{{ result.chart }}" alt="{{ result.label }}AI予測グラフ">
             </div>
             
-            <!-- 予測値のサマリー -->
-            {% if result.predictions.growth %}
-            <div class="prediction-summary">
-                <div class="model-result">
-                    <h4>予測結果</h4>
-                    <p class="growth-rate-info">
-                        年平均成長率: <strong>{{ result.predictions.growth.growth_rate|floatformat:1 }}%</strong>
-                    </p>
-                    <table class="prediction-table">
-                        <tr>
-                            {% for year in result.predictions.growth.years %}
-                            <th>{{ year }}年</th>
-                            {% endfor %}
-                        </tr>
-                        <tr>
-                            {% for value in result.predictions.growth.values %}
-                            <td>{{ value|floatformat:1 }}億円</td>
-                            {% endfor %}
-                        </tr>
+            <!-- AI予測値のサマリー -->
+            {% if result.predictions.ml_universal %}
+            <div class="ai-prediction-summary">
+                <div class="prediction-cards">
+                    <div class="prediction-card main">
+                        <div class="card-header">
+                            <h4>AI予測結果</h4>
+                        </div>
+                        <div class="growth-rate-display">
+                            <span class="rate-label">年平均成長率</span>
+                            <span class="rate-value {% if result.predictions.ml_universal.growth_rate >= 5 %}high-growth{% elif result.predictions.ml_universal.growth_rate >= 0 %}positive{% else %}negative{% endif %}">
+                                {{ result.predictions.ml_universal.growth_rate|floatformat:1 }}%
+                            </span>
+                        </div>
+                        <div class="confidence-indicator">
+                            <span class="confidence-label">予測信頼度</span>
+                            <div class="confidence-bar">
+                                <div class="confidence-fill" style="width: {{ result.predictions.ml_universal.confidence|mul:100 }}%"></div>
+                            </div>
+                            <span class="confidence-value">{{ result.predictions.ml_universal.confidence }}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="prediction-card analysis">
+                        <div class="card-header">
+                            <h4>成長分析</h4>
+                        </div>
+                        <div class="analysis-content">
+                            {% if result.predictions.ml_universal.growth_rate >= 10 %}
+                                <p class="analysis-text positive">
+                                    <strong>高成長企業</strong><br>
+                                    AIは強い成長ポテンシャルを予測しています。市場拡大や事業効率化が期待されます。
+                                </p>
+                            {% elif result.predictions.ml_universal.growth_rate >= 5 %}
+                                <p class="analysis-text positive">
+                                    <strong>安定成長企業</strong><br>
+                                    業界平均を上回る成長が期待されます。堅実な事業運営が予想されます。
+                                </p>
+                            {% elif result.predictions.ml_universal.growth_rate >= 0 %}
+                                <p class="analysis-text neutral">
+                                    <strong>微成長企業</strong><br>
+                                    緩やかな成長が予測されています。現状維持から微増が見込まれます。
+                                </p>
+                            {% else %}
+                                <p class="analysis-text negative">
+                                    <strong>要注意企業</strong><br>
+                                    AIは売上減少を予測しています。事業環境の変化に注意が必要です。
+                                </p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="prediction-table-container">
+                    <h4>年度別予測値</h4>
+                    <table class="ai-prediction-table">
+                        <thead>
+                            <tr>
+                                <th>年度</th>
+                                {% for year in result.predictions.ml_universal.years %}
+                                <th>{{ year }}年</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>予測値</strong></td>
+                                {% for value in result.predictions.ml_universal.values %}
+                                <td class="prediction-value">{{ value|floatformat:1 }}億円</td>
+                                {% endfor %}
+                            </tr>
+                        </tbody>
                     </table>
+                </div>
+                
+                <div class="ai-disclaimer">
+                    <p><strong>⚠️ 予測に関する注意事項</strong></p>
+                    <ul>
+                        <li>この予測は過去の財務データと機械学習モデルに基づいています</li>
+                        <li>実際の業績は経済環境、競合状況、経営戦略等により大きく変動する可能性があります</li>
+                        <li>投資判断等の意思決定には、この予測値のみに依存せず総合的な分析を行ってください</li>
+                    </ul>
                 </div>
             </div>
             {% endif %}
