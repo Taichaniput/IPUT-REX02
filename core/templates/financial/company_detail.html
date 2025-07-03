@@ -141,8 +141,26 @@
     <div class="financial-analysis-section">
         <h3>企業の特徴・財務分析</h3>
         <div class="analysis-content">
-            {% if request.user.is_authenticated and ai_analysis.FINANCIAL_ANALYSIS %}
-                {{ ai_analysis.FINANCIAL_ANALYSIS }}
+            {% if request.user.is_authenticated %}
+                <!-- ログイン済みユーザー：基本財務分析 + AI分析は別タブで詳細表示 -->
+                <div class="financial-analysis-basic">
+                    <p>この企業の過去{{ financial_data|length }}年間の財務データに基づく分析です。
+                    {% with latest=financial_data.0.data oldest=financial_data.last.data %}
+                    {% if latest.net_sales and oldest.net_sales %}
+                    売上高は{{ oldest.fiscal_year }}年の{{ oldest.net_sales|to_billion|floatformat:1 }}億円から{{ latest.fiscal_year }}年の{{ latest.net_sales|to_billion|floatformat:1 }}億円へと推移しています。
+                    {% endif %}
+                    {% endwith %}
+                    </p>
+                    <p><strong>詳細なAI分析は「AI企業分析」タブでご覧いただけます。</strong></p>
+                </div>
+                
+                <!-- 企業概要（Tavilyベース） -->
+                <div class="company-overview-section" id="company-overview-section">
+                    <h4>📋 企業概要</h4>
+                    <div class="company-overview-content">
+                        <div class="loading-text">企業情報を取得中...</div>
+                    </div>
+                </div>
             {% else %}
                 <p>この企業の過去{{ financial_data|length }}年間の財務データに基づく基本分析です。
                 {% with latest=financial_data.0.data oldest=financial_data.last.data %}
@@ -194,7 +212,7 @@
                         <img src="data:image/png;base64,{{ result.chart }}" alt="{{ result.label }}3シナリオ予測グラフ" class="scenario-prediction-chart">
                     </div>
                     
-                    <div class="scenario-grid">
+                    <div class="scenario-grid growth-scenarios">
                         <div class="scenario optimistic">
                             <h5>🚀 楽観シナリオ</h5>
                             <p class="growth-rate">{{ result.predictions.scenarios.optimistic.growth_rate|floatformat:1 }}%</p>
@@ -217,7 +235,7 @@
             
             <!-- 純利益シナリオ分析 -->
             <h3>💰 純利益分析</h3>
-            <div class="scenario-grid">
+            <div class="scenario-grid profit-scenarios">
                 <div class="scenario optimistic">
                     <h5>🚀 楽観シナリオ</h5>
                     <div class="scenario-explanation">{{ ai_analysis.PROFIT_SCENARIOS.optimistic|default:"分析中..." }}</div>

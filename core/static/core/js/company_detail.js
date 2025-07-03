@@ -193,20 +193,26 @@ function updateAnalysisContent(aiAnalysis) {
     updateScenarioAnalysis(aiAnalysis);
     updatePositioningAnalysis(aiAnalysis);
     updateSummaryAnalysis(aiAnalysis);
+    updateCompanyOverview(aiAnalysis);
 }
 
 /**
  * シナリオ分析を更新
  */
 function updateScenarioAnalysis(aiAnalysis) {
+    // 成長率分析の更新（growth-scenariosクラス内のみ）
     if (aiAnalysis.GROWTH_SCENARIOS) {
-        updateElement('.scenario.optimistic .scenario-explanation', aiAnalysis.GROWTH_SCENARIOS.optimistic);
-        updateElement('.scenario.current .scenario-explanation', aiAnalysis.GROWTH_SCENARIOS.current);
-        updateElement('.scenario.pessimistic .scenario-explanation', aiAnalysis.GROWTH_SCENARIOS.pessimistic);
+        const growthScenarios = document.querySelectorAll('.growth-scenarios');
+        growthScenarios.forEach(container => {
+            updateElement(container.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.optimistic);
+            updateElement(container.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.current);
+            updateElement(container.querySelector('.scenario.pessimistic .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.pessimistic);
+        });
     }
     
+    // 純利益分析の更新（profit-scenariosクラス内のみ）
     if (aiAnalysis.PROFIT_SCENARIOS) {
-        const profitScenarios = document.querySelectorAll('.scenario-grid')[1]; // 2番目のscenario-grid
+        const profitScenarios = document.querySelector('.profit-scenarios');
         if (profitScenarios) {
             updateElement(profitScenarios.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.optimistic);
             updateElement(profitScenarios.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.current);
@@ -230,6 +236,19 @@ function updatePositioningAnalysis(aiAnalysis) {
 function updateSummaryAnalysis(aiAnalysis) {
     if (aiAnalysis.SUMMARY) {
         updateElement('.summary-content', aiAnalysis.SUMMARY);
+    }
+}
+
+/**
+ * 企業概要を更新（財務表タブ用）
+ */
+function updateCompanyOverview(aiAnalysis) {
+    if (aiAnalysis.COMPANY_OVERVIEW) {
+        const overviewContent = document.querySelector('.company-overview-content');
+        if (overviewContent) {
+            overviewContent.innerHTML = `<p>${aiAnalysis.COMPANY_OVERVIEW}</p>`;
+            overviewContent.classList.add('fade-in-content');
+        }
     }
 }
 
