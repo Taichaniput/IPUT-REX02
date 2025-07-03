@@ -136,27 +136,71 @@ def company_detail(request, edinet_code):
     # 3. クラスタリング分析
     cluster_info = get_company_cluster_info(edinet_code)
     
-    # 4. AI分析（ログインユーザーのみ）
-    ai_analysis = {}
-    if request.user.is_authenticated:
-        print(f"Starting AI analysis for {company_name}...")
-        print(f"Prediction results available: {bool(prediction_results)}")
-        print(f"Cluster info available: {bool(cluster_info)}")
-        ai_analysis = generate_comprehensive_ai_analysis(
-            company_name, edinet_code, financial_data, 
-            prediction_results, cluster_info
-        )
-        print(f"AI analysis completed with keys: {ai_analysis.keys()}")
-    
+    # 4. ページを先に表示（AI分析は非同期で後から実行）
     return render(request, 'financial/company_detail.html', {
         'company_name': company_name,
         'edinet_code': edinet_code,
         'financial_data': data_with_indicators,
         'prediction_results': prediction_results if request.user.is_authenticated else {},
         'cluster_info': cluster_info if request.user.is_authenticated else None,
-        'ai_analysis': ai_analysis,
+        'ai_analysis': {},  # 空の辞書で初期化、後でAJAXで取得
         'show_login_prompt': not request.user.is_authenticated,
     })
+
+
+def ai_analysis_ajax(request, edinet_code):
+    """AI分析をAJAXで実行するエンドポイント"""
+    from django.http import JsonResponse
+    
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'ログインが必要です'}, status=401)
+    
+    try:
+        # 基本データを再取得
+        financial_data = FinancialData.objects.filter(
+            edinet_code=edinet_code
+        ).select_related('document').order_by('-fiscal_year')
+        
+        if not financial_data.exists():
+            return JsonResponse({'error': '企業データが見つかりません'}, status=404)
+        
+        company_name = financial_data.first().filer_name
+        
+        # 財務指標を計算
+        data_with_indicators = []
+        for fd in financial_data:
+            indicators = calculate_financial_indicators(fd)
+            data_with_indicators.append({
+                'data': fd,
+                'indicators': indicators
+            })
+        
+        # 予測分析
+        prediction_results = {}
+        if len(financial_data) >= 3:
+            prediction_results = perform_predictions(financial_data)
+        
+        # クラスタリング分析
+        cluster_info = get_company_cluster_info(edinet_code)
+        
+        # AI分析実行
+        print(f"Starting AI analysis for {company_name}...")
+        ai_analysis = generate_comprehensive_ai_analysis(
+            company_name, edinet_code, data_with_indicators, 
+            prediction_results, cluster_info
+        )
+        print(f"AI analysis completed with keys: {ai_analysis.keys()}")
+        
+        return JsonResponse({
+            'success': True,
+            'ai_analysis': ai_analysis
+        })
+        
+    except Exception as e:
+        print(f"AI analysis AJAX error: {e}")
+        return JsonResponse({
+            'error': f'分析中にエラーが発生しました: {str(e)}'
+        }, status=500)
 
 
 def perform_predictions(financial_data):

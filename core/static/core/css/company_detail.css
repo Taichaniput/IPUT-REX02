@@ -441,3 +441,165 @@
     margin-bottom: 20px;
     font-size: 1.5rem;
 }
+
+/* AI分析ローディング */
+.ai-loading-content {
+    text-align: center;
+    padding: 60px 40px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 12px;
+    margin: 20px 0;
+}
+
+.loading-section h3 {
+    color: #495057;
+    margin: 20px 0;
+    font-size: 1.5rem;
+}
+
+.loading-section p {
+    color: #6c757d;
+    margin-bottom: 30px;
+    line-height: 1.6;
+}
+
+.loading-spinner-large {
+    width: 60px;
+    height: 60px;
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+.loading-steps {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 30px;
+}
+
+.loading-step {
+    padding: 10px 15px;
+    background: #ffffff;
+    border: 2px solid #dee2e6;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6c757d;
+    transition: all 0.3s ease;
+    opacity: 0.5;
+}
+
+.loading-step.active {
+    border-color: #007bff;
+    color: #007bff;
+    background: #e3f2fd;
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.loading-step.completed {
+    border-color: #28a745;
+    color: #28a745;
+    background: #d4edda;
+    opacity: 1;
+}
+
+.loading-step.completed::after {
+    content: ' ✓';
+    color: #28a745;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* AI分析エラー */
+.ai-analysis-error {
+    text-align: center;
+    padding: 40px;
+    background: #f8d7da;
+    border: 2px solid #dc3545;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.error-content h3 {
+    color: #721c24;
+    margin-bottom: 15px;
+}
+
+.error-content p {
+    color: #721c24;
+    margin-bottom: 20px;
+}
+
+/* 通知 */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    border-radius: 8px;
+    color: white;
+    font-weight: 500;
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+}
+
+.notification-success {
+    background: linear-gradient(135deg, #28a745, #20c997);
+}
+
+.notification-error {
+    background: linear-gradient(135deg, #dc3545, #e74c3c);
+}
+
+.notification-info {
+    background: linear-gradient(135deg, #007bff, #17a2b8);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* コンテンツフェードイン */
+.fade-in-content {
+    animation: fadeInContent 0.5s ease;
+}
+
+@keyframes fadeInContent {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+    .loading-steps {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .loading-step {
+        width: 100%;
+        max-width: 250px;
+        text-align: center;
+    }
+}

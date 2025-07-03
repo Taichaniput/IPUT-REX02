@@ -7,6 +7,7 @@ app_name = 'financial'
 urlpatterns = [
     path('', views.home, name='home'),
     path('company/<str:edinet_code>/', views.company_detail, name='company_detail'),
+    path('api/ai-analysis/<str:edinet_code>/', views.ai_analysis_ajax, name='ai_analysis_ajax'),
     
     # 認証関連URL
     path('accounts/register/', views.register, name='register'),

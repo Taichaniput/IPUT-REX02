@@ -43,3 +43,6 @@ fonts/*.ttf
 
 .md
 !README.md
+
+
+**.json

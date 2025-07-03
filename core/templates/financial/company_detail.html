@@ -179,7 +179,7 @@
                 <a href="{% url 'financial:login' %}" class="btn-secondary">ログイン</a>
             </div>
         </div>
-    {% elif ai_analysis %}
+    {% else %}
         <!-- 成長率シナリオ分析 -->
         {% if prediction_results %}
         <div class="scenario-analysis">
@@ -260,10 +260,12 @@
             </div>
         </div>
         
-    {% else %}
+        <!-- データ不足時の表示（予測結果とクラスタ情報の両方がない場合のみ） -->
+        {% if not prediction_results and not cluster_info %}
         <div class="no-data">
             <p>AI分析に必要なデータが不足しています。</p>
         </div>
+        {% endif %}
     {% endif %}
 </div>
 
