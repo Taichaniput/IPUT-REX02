@@ -94,7 +94,7 @@ DATABASES = {
 }
 
 # EDINET API設定
-EDINET_API_KEY = os.environ.get('EDINET_API_KEY', 'YOUR_API_KEY_HERE')
+EDINET_API_KEY = os.environ.get('EDINET_API_KEY')
 
 # 既存パイプラインのパス
 EDINET_PIPELINE_PATH = EDINET_PIPELINE_PATH = os.path.join(BASE_DIR, '..')  
