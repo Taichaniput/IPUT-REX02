@@ -67,6 +67,7 @@ async function loadAIAnalysis() {
         showAIAnalysisLoading();
         
         // AJAX リクエスト
+        console.log(`Fetching AI analysis for edinet code: ${edinetCode}`);
         const response = await fetch(`/api/ai-analysis/${edinetCode}/`, {
             method: 'GET',
             headers: {
@@ -75,9 +76,11 @@ async function loadAIAnalysis() {
             }
         });
         
+        console.log('Response status:', response.status);
         const data = await response.json();
+        console.log('Response data:', data);
         
-        if (data.success) {
+        if (response.ok && data.success) {
             // AI分析結果を表示
             displayAIAnalysis(data.ai_analysis);
             window.aiAnalysisLoaded = true;
@@ -181,6 +184,9 @@ function displayAIAnalysis(aiAnalysis) {
     // AI分析結果をDOMに反映
     updateAnalysisContent(aiAnalysis);
     
+    // 3シナリオ分析を各チャートに対してロード
+    loadChartScenarioAnalysis();
+    
     // 成功メッセージを表示
     showNotification('AI分析が完了しました！', 'success');
 }
@@ -200,24 +206,34 @@ function updateAnalysisContent(aiAnalysis) {
  * シナリオ分析を更新
  */
 function updateScenarioAnalysis(aiAnalysis) {
-    // 成長率分析の更新（growth-scenariosクラス内のみ）
-    if (aiAnalysis.GROWTH_SCENARIOS) {
-        const growthScenarios = document.querySelectorAll('.growth-scenarios');
-        growthScenarios.forEach(container => {
+    // 売上高シナリオ分析の更新
+    if (aiAnalysis.SALES_SCENARIOS) {
+        const salesScenarios = document.querySelectorAll('.sales-scenarios');
+        salesScenarios.forEach(container => {
+            updateElement(container.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.SALES_SCENARIOS.optimistic);
+            updateElement(container.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.SALES_SCENARIOS.current);
+            updateElement(container.querySelector('.scenario.pessimistic .scenario-explanation'), aiAnalysis.SALES_SCENARIOS.pessimistic);
+        });
+    }
+    
+    // 純利益シナリオ分析の更新
+    if (aiAnalysis.PROFIT_SCENARIOS) {
+        const profitScenarios = document.querySelectorAll('.profit-scenarios');
+        profitScenarios.forEach(container => {
+            updateElement(container.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.optimistic);
+            updateElement(container.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.current);
+            updateElement(container.querySelector('.scenario.pessimistic .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.pessimistic);
+        });
+    }
+    
+    // 旧形式の成長シナリオにも対応（後方互換性）
+    if (aiAnalysis.GROWTH_SCENARIOS && !aiAnalysis.SALES_SCENARIOS) {
+        const salesScenarios = document.querySelectorAll('.sales-scenarios');
+        salesScenarios.forEach(container => {
             updateElement(container.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.optimistic);
             updateElement(container.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.current);
             updateElement(container.querySelector('.scenario.pessimistic .scenario-explanation'), aiAnalysis.GROWTH_SCENARIOS.pessimistic);
         });
-    }
-    
-    // 純利益分析の更新（profit-scenariosクラス内のみ）
-    if (aiAnalysis.PROFIT_SCENARIOS) {
-        const profitScenarios = document.querySelector('.profit-scenarios');
-        if (profitScenarios) {
-            updateElement(profitScenarios.querySelector('.scenario.optimistic .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.optimistic);
-            updateElement(profitScenarios.querySelector('.scenario.current .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.current);
-            updateElement(profitScenarios.querySelector('.scenario.pessimistic .scenario-explanation'), aiAnalysis.PROFIT_SCENARIOS.pessimistic);
-        }
     }
 }
 
@@ -352,9 +368,96 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!window.aiAnalysisLoaded && !window.aiAnalysisLoading) {
                 loadAIAnalysis();
             }
+            // 企業概要セクションも自動でロード
+            if (!window.companyOverviewLoaded && !window.companyOverviewLoading) {
+                loadCompanyOverview();
+            }
         }, 500); // 500ms後に開始
     }
 });
+
+/**
+ * 企業概要セクションをAJAXで読み込む
+ */
+async function loadCompanyOverview() {
+    // すでに読み込み中または完了している場合は何もしない
+    if (window.companyOverviewLoading || window.companyOverviewLoaded) {
+        return;
+    }
+    
+    window.companyOverviewLoading = true;
+    
+    // EDINETコードを取得
+    const pathParts = window.location.pathname.split('/');
+    const edinetCode = pathParts[pathParts.indexOf('company') + 1];
+    
+    if (!edinetCode) {
+        console.error('EDINETコードが見つかりません');
+        return;
+    }
+    
+    try {
+        console.log(`Fetching company overview for edinet code: ${edinetCode}`);
+        const response = await fetch(`/api/company-overview/${edinetCode}/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.company_overview) {
+            // 企業概要を表示
+            displayCompanyOverview(data.company_overview);
+            window.companyOverviewLoaded = true;
+        } else {
+            throw new Error(data.error || '企業概要の取得に失敗しました');
+        }
+        
+    } catch (error) {
+        console.error('企業概要エラー:', error);
+        showCompanyOverviewError(error.message);
+    } finally {
+        window.companyOverviewLoading = false;
+    }
+}
+
+/**
+ * 企業概要を表示
+ */
+function displayCompanyOverview(companyOverview) {
+    const overviewContent = document.querySelector('.company-overview-content');
+    if (overviewContent) {
+        overviewContent.innerHTML = `<p>${companyOverview}</p>`;
+        overviewContent.classList.add('fade-in-content');
+    }
+}
+
+/**
+ * 企業概要エラーを表示
+ */
+function showCompanyOverviewError(message) {
+    const overviewContent = document.querySelector('.company-overview-content');
+    if (overviewContent) {
+        overviewContent.innerHTML = `
+            <div class="error-content">
+                <p>企業概要の取得でエラーが発生しました: ${message}</p>
+                <button onclick="retryCompanyOverview()" class="btn btn-small">再試行</button>
+            </div>
+        `;
+    }
+}
+
+/**
+ * 企業概要を再試行
+ */
+function retryCompanyOverview() {
+    window.companyOverviewLoaded = false;
+    window.companyOverviewLoading = false;
+    loadCompanyOverview();
+}
 
 /**
  * スムーズスクロール機能（必要に応じて）
@@ -368,4 +471,177 @@ function scrollToElement(elementId) {
             block: 'start'
         });
     }
+}
+
+/**
+ * 各チャートに対して3シナリオ分析をロード
+ */
+function loadChartScenarioAnalysis() {
+    console.log('Loading chart scenario analysis...');
+    const chartAnalysisSections = document.querySelectorAll('.chart-ai-analysis');
+    console.log(`Found ${chartAnalysisSections.length} chart analysis sections`);
+    
+    chartAnalysisSections.forEach((section, index) => {
+        const chartType = section.getAttribute('data-chart-type');
+        const metric = section.getAttribute('data-metric');
+        console.log(`Section ${index}: chart-type = ${chartType}, metric = ${metric}`);
+        console.log(`Section ${index} element:`, section);
+        
+        if (chartType) {
+            console.log(`Loading scenario analysis for chart type: ${chartType}`);
+            loadScenarioAnalysisInternal(chartType, section);
+        } else {
+            console.warn(`Section ${index} has no data-chart-type attribute`);
+            console.warn(`Section ${index} HTML:`, section.outerHTML);
+        }
+    });
+}
+
+/**
+ * 新しい3シナリオ分析読み込み関数（推奨）
+ * @param {string} edinetCode - EDINETコード
+ * @param {string} chartType - チャートタイプ ('sales' または 'profit')
+ * @returns {Promise<Object>} - シナリオ分析結果
+ */
+async function loadScenarioAnalysis(edinetCode, chartType) {
+    try {
+        console.log(`Fetching scenario analysis for ${chartType} chart: ${edinetCode}`);
+        
+        const response = await fetch(`/api/scenario-analysis/${edinetCode}/${chartType}/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.scenario_analysis) {
+            return data.scenario_analysis;
+        } else {
+            throw new Error(data.error || 'シナリオ分析の取得に失敗しました');
+        }
+        
+    } catch (error) {
+        console.error('シナリオ分析エラー:', error);
+        throw error;
+    }
+}
+
+/**
+ * 3シナリオ分析をAJAXで取得（内部使用）
+ * @param {string} chartType - チャートタイプ ('sales' または 'profit')
+ * @param {HTMLElement} targetSection - 更新対象のセクション
+ */
+async function loadScenarioAnalysisInternal(chartType, targetSection) {
+    console.log(`=== loadScenarioAnalysisInternal START ===`);
+    console.log(`chartType: ${chartType}`);
+    console.log(`targetSection:`, targetSection);
+    console.log(`targetSection.dataset.loaded: ${targetSection.dataset.loaded}`);
+    
+    // すでに読み込み済みの場合はスキップ
+    if (targetSection.dataset.loaded === 'true') {
+        console.log(`Chart ${chartType} already loaded, skipping...`);
+        return;
+    }
+    
+    // EDINETコードを取得
+    const pathParts = window.location.pathname.split('/');
+    const edinetCode = pathParts[pathParts.indexOf('company') + 1];
+    
+    if (!edinetCode) {
+        console.error('EDINETコードが見つかりません');
+        return;
+    }
+    
+    console.log(`Starting scenario analysis fetch for ${chartType}, EDINET: ${edinetCode}`);
+    console.log(`API URL: /api/scenario-analysis/${edinetCode}/${chartType}/`);
+    
+    try {
+        const response = await fetch(`/api/scenario-analysis/${edinetCode}/${chartType}/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        console.log(`Response status for ${chartType}: ${response.status}`);
+        console.log(`Response headers:`, response.headers);
+        
+        const data = await response.json();
+        console.log(`Response data for ${chartType}:`, data);
+        
+        if (response.ok && data.scenario_analysis) {
+            console.log(`Successfully received scenario analysis for ${chartType}`);
+            console.log(`Scenario analysis data:`, data.scenario_analysis);
+            // シナリオ分析を表示
+            updateChartScenarioAnalysis(targetSection, data.scenario_analysis);
+            targetSection.dataset.loaded = 'true';
+            console.log(`Successfully updated chart ${chartType}`);
+        } else {
+            throw new Error(data.error || 'シナリオ分析の取得に失敗しました');
+        }
+        
+    } catch (error) {
+        console.error(`シナリオ分析エラー (${chartType}):`, error);
+        showChartScenarioError(targetSection, error.message);
+    }
+    
+    console.log(`=== loadScenarioAnalysisInternal END ===`);
+}
+
+/**
+ * チャートシナリオ分析を更新
+ * @param {HTMLElement} targetSection - 更新対象のセクション
+ * @param {Object} scenarioAnalysis - シナリオ分析データ
+ */
+function updateChartScenarioAnalysis(targetSection, scenarioAnalysis) {
+    console.log(`=== updateChartScenarioAnalysis START ===`);
+    console.log(`targetSection:`, targetSection);
+    console.log(`scenarioAnalysis:`, scenarioAnalysis);
+    
+    const scenarios = targetSection.querySelectorAll('.scenario');
+    console.log(`Found ${scenarios.length} scenario elements`);
+    
+    scenarios.forEach((scenario, index) => {
+        const scenarioType = scenario.classList.contains('optimistic') ? 'optimistic' :
+                           scenario.classList.contains('current') ? 'current' :
+                           scenario.classList.contains('pessimistic') ? 'pessimistic' : null;
+        
+        console.log(`Scenario ${index}: type = ${scenarioType}`);
+        console.log(`Scenario ${index} element:`, scenario);
+        
+        if (scenarioType && scenarioAnalysis[scenarioType]) {
+            const explanationElement = scenario.querySelector('.scenario-explanation');
+            console.log(`Scenario ${index} explanation element:`, explanationElement);
+            
+            if (explanationElement) {
+                console.log(`Updating scenario ${scenarioType} with text: ${scenarioAnalysis[scenarioType]}`);
+                explanationElement.textContent = scenarioAnalysis[scenarioType];
+                explanationElement.classList.add('fade-in-content');
+                console.log(`Successfully updated scenario ${scenarioType}`);
+            } else {
+                console.warn(`No explanation element found for scenario ${scenarioType}`);
+            }
+        } else {
+            console.warn(`No data found for scenario type ${scenarioType}`);
+        }
+    });
+    
+    console.log(`=== updateChartScenarioAnalysis END ===`);
+}
+
+/**
+ * チャートシナリオエラーを表示
+ * @param {HTMLElement} targetSection - 更新対象のセクション
+ * @param {string} message - エラーメッセージ
+ */
+function showChartScenarioError(targetSection, message) {
+    const scenarios = targetSection.querySelectorAll('.scenario .scenario-explanation');
+    scenarios.forEach(explanation => {
+        explanation.textContent = `エラー: ${message}`;
+        explanation.classList.add('error-text');
+    });
 }
