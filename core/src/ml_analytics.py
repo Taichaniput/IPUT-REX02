@@ -11,6 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.cluster import KMeans
+import hdbscan
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 import umap
@@ -313,7 +314,9 @@ def get_company_cluster_info(edinet_code):
         )
         
         # 特徴量の定義
-        FEATURES = ['net_assets', 'total_assets', 'net_income', 'r_and_d_expenses', 'number_of_employees']
+        FEATURES = [
+            'net_assets', 'total_assets', 'net_income', 'r_and_d_expenses', 'number_of_employees'
+        ]
         
         # データフレームに変換
         df = pd.DataFrame.from_records(
@@ -323,7 +326,16 @@ def get_company_cluster_info(edinet_code):
         
         # データ前処理
         df_filled = df.dropna(subset=FEATURES, how='all')
-        df_filled[FEATURES] = df_filled[FEATURES].fillna(df_filled[FEATURES].median())
+        
+        # 欠損値処理
+        for feature in FEATURES:
+            if feature in df_filled.columns:
+                df_filled[feature] = df_filled[feature].fillna(df_filled[feature].median())
+        
+        # 無限大値の処理
+        numeric_columns = df_filled.select_dtypes(include=[np.number]).columns
+        df_filled[numeric_columns] = df_filled[numeric_columns].replace([np.inf, -np.inf], np.nan)
+        df_filled[numeric_columns] = df_filled[numeric_columns].fillna(df_filled[numeric_columns].median())
         
         if len(df_filled) < 3 or edinet_code not in df_filled.index:
             return None
@@ -336,16 +348,39 @@ def get_company_cluster_info(edinet_code):
         umap_reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=15, min_dist=0.1)
         X_umap = umap_reducer.fit_transform(X_scaled)
         
-        # クラスタリング
-        kmeans = KMeans(n_clusters=3, random_state=42, n_init='auto')
-        labels = kmeans.fit_predict(X_scaled)
+        # 密度ベースクラスタリング
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=30, min_samples=8, metric='euclidean')
+        labels = clusterer.fit_predict(X_umap)
+        
+        # ノイズポイントを最近傍クラスタに割り当て
+        from sklearn.neighbors import NearestNeighbors
+        noise_mask = labels == -1
+        if noise_mask.any():
+            cluster_mask = labels != -1
+            if cluster_mask.any():
+                # クラスタポイントでNearestNeighborsを学習
+                nbrs = NearestNeighbors(n_neighbors=1, metric='euclidean').fit(X_umap[cluster_mask])
+                # ノイズポイントの最近傍クラスタを取得
+                _, nearest_indices = nbrs.kneighbors(X_umap[noise_mask])
+                # 最近傍点のクラスタラベルを割り当て
+                cluster_labels_only = labels[cluster_mask]
+                for i, nearest_idx in enumerate(nearest_indices.flatten()):
+                    noise_indices = np.where(noise_mask)[0]
+                    labels[noise_indices[i]] = cluster_labels_only[nearest_idx]
+        
         df_filled['cluster'] = labels
         
         # 対象企業の情報
         company_cluster = df_filled.loc[edinet_code, 'cluster']
         company_year = df_filled.loc[edinet_code, 'fiscal_year']
         
-        # 同じクラスタの企業（年度情報付き）
+        # 最近傍割り当て後はノイズポイントは存在しないはず
+        # 念のためのチェック
+        if company_cluster == -1:
+            print(f"Warning: Company {edinet_code} still classified as noise after nearest neighbor assignment")
+            company_cluster = 0  # デフォルトクラスタに割り当て
+        
+        # 同じクラスタの企業
         same_cluster_df = df_filled[df_filled['cluster'] == company_cluster]
         same_cluster_companies = []
         for idx in same_cluster_df.index:
@@ -355,9 +390,9 @@ def get_company_cluster_info(edinet_code):
                     'name': same_cluster_df.loc[idx, 'filer_name'],
                     'year': same_cluster_df.loc[idx, 'fiscal_year']
                 })
-        same_cluster_companies = same_cluster_companies[:5]  # 上位5社
+        same_cluster_companies = same_cluster_companies[:5]
         
-        # クラスタの特徴（平均値）
+        # クラスタの特徴
         cluster_means = df_filled[df_filled['cluster'] == company_cluster][FEATURES].mean()
         overall_means = df_filled[FEATURES].mean()
         
@@ -365,18 +400,22 @@ def get_company_cluster_info(edinet_code):
         relative_strengths = (cluster_means / overall_means - 1) * 100
         top_features = relative_strengths.abs().nlargest(3).index.tolist()
         
-        # UMAPの解釈（次元削減の意味を理解）
+        # UMAPの解釈
         umap_interpretation = interpret_umap_components(FEATURES)
         
-        # グラフ生成（UMAP空間でプロット）
+        # グラフ生成
         chart = create_cluster_umap_chart(
             X_umap, labels, df_filled.index, df_filled['fiscal_year'].to_dict(),
             edinet_code, umap_interpretation
         )
         
+        # クラスタ数を計算
+        unique_clusters = set(labels)
+        total_clusters = len(unique_clusters) - (1 if -1 in unique_clusters else 0)
+        
         return {
             'cluster_id': int(company_cluster),
-            'total_clusters': 3,
+            'total_clusters': total_clusters,
             'same_cluster_companies': same_cluster_companies,
             'cluster_characteristics': {
                 feat: {
@@ -430,12 +469,12 @@ def interpret_pca_components(pca, features):
 
 
 def interpret_umap_components(features):
-    """UMAP次元削減の解釈（特徴量の意味を説明）"""
+    """UMAP + HDBSCAN解釈"""
     feature_labels = [get_feature_label(f) for f in features]
     
     interpretation = {
-        'method': 'UMAP',
-        'description': '非線形次元削減により、企業の財務特性を2次元で可視化',
+        'method': 'UMAP + HDBSCAN',
+        'description': '非線形次元削減と密度ベースクラスタリング',
         'features_used': [
             {'name': label, 'original': feat} 
             for feat, label in zip(features, feature_labels)
@@ -443,12 +482,15 @@ def interpret_umap_components(features):
         'advantages': [
             '企業間の局所的な類似性を保持',
             '非線形な関係性を捉える',
-            '大規模データに対応可能'
+            '任意の形状のクラスタを発見',
+            '密度の異なるクラスタに対応',
+            'ノイズポイントを特定'
         ],
         'interpretation_notes': [
             '距離が近い企業は財務特性が類似',
-            'クラスタ内の企業は事業規模や収益性が近い',
-            '外れ値の企業は独特な財務構造を持つ'
+            'クラスタは密度に基づいて自動的に形成',
+            'ノイズとして分類された企業は独特な特徴を持つ',
+            '球状でないクラスタも適切に検出可能'
         ]
     }
     
@@ -456,34 +498,50 @@ def interpret_umap_components(features):
 
 
 def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, umap_interpretation):
-    """UMAP空間でのクラスタマップ（年度情報付き）"""
+    """UMAP空間でのクラスタマップ"""
     # フォント設定
     font_prop = FontProperties(fname=FONT_PATH)
     
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(12, 9))
     plt.style.use('seaborn-v0_8-whitegrid')
-    
-    # 色定義
-    colors = {0: 'lightcoral', 1: 'lightgreen', 2: 'lightblue'}
     
     # データフレーム作成
     umap_df = pd.DataFrame(X_umap, columns=['UMAP1', 'UMAP2'], index=index)
     umap_df['cluster'] = labels
     umap_df['year'] = pd.Series(year_dict)
     
-    # 全企業をプロット
-    for cluster_id in [0, 1, 2]:
+    # クラスタを取得
+    unique_clusters = sorted(set(labels))
+    
+    # 基本色設定
+    colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+    
+    # 全企業をプロット（凡例は主要クラスタのみ）
+    for i, cluster_id in enumerate(unique_clusters):
         cluster_data = umap_df[umap_df['cluster'] == cluster_id]
-        plt.scatter(
-            cluster_data['UMAP1'], 
-            cluster_data['UMAP2'],
-            c=colors[cluster_id], 
-            label=f'クラスタ{cluster_id}',
-            alpha=0.6, 
-            s=60,
-            edgecolors='white',
-            linewidth=0.5
-        )
+        
+        color = colors[i % len(colors)]
+        # 大きなクラスタ（10点以上）のみ凡例に表示
+        if len(cluster_data) >= 10:
+            label = f'クラスタ{cluster_id}'
+            show_label = True
+        else:
+            label = None
+            show_label = False
+        alpha = 0.8
+        s = 60
+            
+        if len(cluster_data) > 0:
+            plt.scatter(
+                cluster_data['UMAP1'], 
+                cluster_data['UMAP2'],
+                c=color, 
+                label=label if show_label else None,
+                alpha=alpha, 
+                s=s,
+                edgecolors='black',
+                linewidth=0.5
+            )
     
     # 対象企業をハイライト
     if target_code in umap_df.index:
@@ -515,7 +573,7 @@ def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, uma
     # 軸ラベル
     plt.xlabel('UMAP 次元1', fontproperties=font_prop, fontsize=12)
     plt.ylabel('UMAP 次元2', fontproperties=font_prop, fontsize=12)
-    plt.title('企業の財務特性に基づくクラスタリング分析（UMAP）', fontproperties=font_prop, fontsize=14, fontweight='bold')
+    plt.title('企業の財務特性に基づくクラスタリング分析', fontproperties=font_prop, fontsize=14, fontweight='bold')
     
     # 凡例
     plt.legend(prop=font_prop, loc='upper right')
@@ -523,11 +581,16 @@ def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, uma
     # グリッドスタイル
     plt.grid(True, alpha=0.3)
     
+    # クラスタ数の計算
+    num_clusters = len([c for c in unique_clusters if c != -1])
+    noise_count = len([c for c in labels if c == -1])
+    
     # 説明テキスト
     description_text = f"""
-使用特徴量: {', '.join([f['name'] for f in umap_interpretation['features_used']])}
-次元削減手法: {umap_interpretation['method']}
-クラスタリング: K-means (k=3)
+使用特徴量: {', '.join([f['name'] for f in umap_interpretation['features_used'][:3]])}等 {len(umap_interpretation['features_used'])}個
+次元削減: UMAP
+クラスタリング: HDBSCAN + 最近傍割り当て
+発見クラスタ数: {num_clusters}個 (全企業をクラスタに割り当て)
     """
     
     plt.figtext(0.02, 0.02, description_text, fontsize=8, fontproperties=font_prop,
@@ -646,12 +709,26 @@ def get_metric_label(metric):
 
 
 def get_feature_label(feature):
-    """特徴量の日本語ラベル"""
+    """特徴量の日本語ラベル（拡張版）"""
     labels = {
+        # 基本財務データ
         'net_assets': '純資産',
         'total_assets': '総資産',
+        'net_sales': '売上高',
+        'operating_income': '営業利益',
+        'ordinary_income': '経常利益',
         'net_income': '純利益',
+        'operating_cash_flow': '営業キャッシュフロー',
         'r_and_d_expenses': '研究開発費',
-        'number_of_employees': '従業員数'
+        'number_of_employees': '従業員数',
+        
+        # 財務比率
+        'roe': 'ROE（自己資本利益率）',
+        'roa': 'ROA（総資産利益率）',
+        'operating_margin': '営業利益率',
+        'equity_ratio': '自己資本比率',
+        'rd_intensity': 'R&D集約度',
+        'asset_turnover': '総資産回転率',
+        'employee_productivity': '従業員1人当たり売上高'
     }
     return labels.get(feature, feature)
