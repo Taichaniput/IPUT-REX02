@@ -13,6 +13,8 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
+import umap
+from statsmodels.tsa.arima.model import ARIMA
 import warnings
 warnings.filterwarnings('ignore')
 import platform
@@ -75,8 +77,8 @@ def perform_predictions(financial_data):
         years = valid_data['fiscal_year'].values
         values = valid_data[metric].values / 100000000  # 億円単位
         
-        # 3シナリオ予測実行
-        scenarios = predict_three_scenarios(years, values)
+        # ARIMAベースの予測を試行、失敗時は既存手法にフォールバック
+        scenarios = predict_scenarios_hybrid(years, values)
         
         # グラフ生成
         chart = create_scenario_chart(
@@ -143,6 +145,113 @@ def predict_three_scenarios(years, values):
     }
     
     return scenarios
+
+
+def predict_arima_scenarios(years, values):
+    """ARIMAモデルによる3シナリオ予測"""
+    try:
+        # データの前処理と検証
+        if len(values) < 5:
+            return None
+        
+        # 欠損値や無効値のチェック
+        clean_values = [v for v in values if v is not None and v > 0]
+        if len(clean_values) < 5:
+            return None
+        
+        # ARIMAモデルの学習
+        # order=(1,1,1)は一般的な設定だが、データに応じて調整可能
+        model = ARIMA(clean_values, order=(1, 1, 1))
+        results = model.fit()
+        
+        # 3年先の予測と信頼区間
+        forecast = results.get_forecast(steps=3)
+        pred_mean = forecast.predicted_mean
+        pred_ci = forecast.conf_int(alpha=0.3)  # 70%信頼区間
+        
+        # デバッグ: データ型の確認
+        # print(f"pred_mean type: {type(pred_mean)}, pred_ci type: {type(pred_ci)}")
+        
+        # NumPy配列の場合はPandasシリーズに変換
+        if isinstance(pred_mean, np.ndarray):
+            pred_mean = pd.Series(pred_mean)
+        if isinstance(pred_ci, np.ndarray):
+            pred_ci = pd.DataFrame(pred_ci)
+        
+        # 将来年度の設定
+        future_years = [years[-1] + i for i in range(1, 4)]
+        
+        # 成長率の計算
+        def calculate_growth_rate(current_val, future_val):
+            if current_val > 0:
+                return ((future_val / current_val) - 1) * 100
+            return 0
+        
+        last_value = clean_values[-1]
+        
+        # 3シナリオの構築
+        scenarios = {
+            'optimistic': {
+                'growth_rate': calculate_growth_rate(last_value, pred_ci.iloc[-1, 1]),
+                'years': future_years,
+                'values': pred_ci.iloc[:, 1].tolist()  # 上限値
+            },
+            'current': {
+                'growth_rate': calculate_growth_rate(last_value, pred_mean.iloc[-1]),
+                'years': future_years,
+                'values': pred_mean.tolist()  # 予測値
+            },
+            'pessimistic': {
+                'growth_rate': calculate_growth_rate(last_value, pred_ci.iloc[-1, 0]),
+                'years': future_years,
+                'values': pred_ci.iloc[:, 0].tolist()  # 下限値
+            }
+        }
+        
+        return scenarios
+        
+    except Exception as e:
+        print(f"ARIMA prediction error: {e}")
+        return None
+
+
+def predict_scenarios_hybrid(years, values):
+    """統計手法とARIMAを組み合わせた予測"""
+    
+    # ARIMAによる予測を試行
+    arima_scenarios = predict_arima_scenarios(years, values)
+    
+    # ARIMAが失敗した場合は既存手法にフォールバック
+    if arima_scenarios is None:
+        return predict_three_scenarios(years, values)
+    
+    # 既存の統計手法による予測
+    statistical_scenarios = predict_three_scenarios(years, values)
+    
+    # 重み付き平均による統合（ARIMA 60%, 統計手法 40%）
+    combined_scenarios = {}
+    for scenario_type in ['optimistic', 'current', 'pessimistic']:
+        arima_values = arima_scenarios[scenario_type]['values']
+        stat_values = statistical_scenarios[scenario_type]['values']
+        
+        # 重み付き平均
+        combined_values = [
+            0.6 * arima_val + 0.4 * stat_val 
+            for arima_val, stat_val in zip(arima_values, stat_values)
+        ]
+        
+        # 成長率の再計算
+        last_value = values[-1]
+        final_value = combined_values[-1]
+        combined_growth_rate = ((final_value / last_value) ** (1/3) - 1) * 100 if last_value > 0 else 0
+        
+        combined_scenarios[scenario_type] = {
+            'growth_rate': combined_growth_rate,
+            'years': arima_scenarios[scenario_type]['years'],
+            'values': combined_values
+        }
+    
+    return combined_scenarios
 
 
 def create_scenario_chart(actual_years, actual_values, scenarios, title, ylabel):
@@ -223,9 +332,9 @@ def get_company_cluster_info(edinet_code):
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(df_filled[FEATURES])
         
-        # PCAで次元削減（2次元）
-        pca = PCA(n_components=2)
-        X_pca = pca.fit_transform(X_scaled)
+        # UMAPで次元削減（2次元）
+        umap_reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=15, min_dist=0.1)
+        X_umap = umap_reducer.fit_transform(X_scaled)
         
         # クラスタリング
         kmeans = KMeans(n_clusters=3, random_state=42, n_init='auto')
@@ -256,13 +365,13 @@ def get_company_cluster_info(edinet_code):
         relative_strengths = (cluster_means / overall_means - 1) * 100
         top_features = relative_strengths.abs().nlargest(3).index.tolist()
         
-        # PCAの解釈（主成分の意味を理解）
-        pca_interpretation = interpret_pca_components(pca, FEATURES)
+        # UMAPの解釈（次元削減の意味を理解）
+        umap_interpretation = interpret_umap_components(FEATURES)
         
-        # グラフ生成（PCA空間でプロット）
-        chart = create_cluster_pca_chart(
-            X_pca, labels, df_filled.index, df_filled['fiscal_year'].to_dict(),
-            edinet_code, pca_interpretation, pca.explained_variance_ratio_
+        # グラフ生成（UMAP空間でプロット）
+        chart = create_cluster_umap_chart(
+            X_umap, labels, df_filled.index, df_filled['fiscal_year'].to_dict(),
+            edinet_code, umap_interpretation
         )
         
         return {
@@ -277,7 +386,7 @@ def get_company_cluster_info(edinet_code):
             },
             'chart': chart,
             'company_year': company_year,
-            'pca_interpretation': pca_interpretation
+            'umap_interpretation': umap_interpretation
         }
         
     except Exception as e:
@@ -318,6 +427,123 @@ def interpret_pca_components(pca, features):
         interpretations.append(interpretation)
     
     return interpretations
+
+
+def interpret_umap_components(features):
+    """UMAP次元削減の解釈（特徴量の意味を説明）"""
+    feature_labels = [get_feature_label(f) for f in features]
+    
+    interpretation = {
+        'method': 'UMAP',
+        'description': '非線形次元削減により、企業の財務特性を2次元で可視化',
+        'features_used': [
+            {'name': label, 'original': feat} 
+            for feat, label in zip(features, feature_labels)
+        ],
+        'advantages': [
+            '企業間の局所的な類似性を保持',
+            '非線形な関係性を捉える',
+            '大規模データに対応可能'
+        ],
+        'interpretation_notes': [
+            '距離が近い企業は財務特性が類似',
+            'クラスタ内の企業は事業規模や収益性が近い',
+            '外れ値の企業は独特な財務構造を持つ'
+        ]
+    }
+    
+    return interpretation
+
+
+def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, umap_interpretation):
+    """UMAP空間でのクラスタマップ（年度情報付き）"""
+    # フォント設定
+    font_prop = FontProperties(fname=FONT_PATH)
+    
+    plt.figure(figsize=(10, 8))
+    plt.style.use('seaborn-v0_8-whitegrid')
+    
+    # 色定義
+    colors = {0: 'lightcoral', 1: 'lightgreen', 2: 'lightblue'}
+    
+    # データフレーム作成
+    umap_df = pd.DataFrame(X_umap, columns=['UMAP1', 'UMAP2'], index=index)
+    umap_df['cluster'] = labels
+    umap_df['year'] = pd.Series(year_dict)
+    
+    # 全企業をプロット
+    for cluster_id in [0, 1, 2]:
+        cluster_data = umap_df[umap_df['cluster'] == cluster_id]
+        plt.scatter(
+            cluster_data['UMAP1'], 
+            cluster_data['UMAP2'],
+            c=colors[cluster_id], 
+            label=f'クラスタ{cluster_id}',
+            alpha=0.6, 
+            s=60,
+            edgecolors='white',
+            linewidth=0.5
+        )
+    
+    # 対象企業をハイライト
+    if target_code in umap_df.index:
+        target_data = umap_df.loc[target_code]
+        plt.scatter(
+            target_data['UMAP1'], 
+            target_data['UMAP2'],
+            c='red', 
+            s=300, 
+            marker='*',
+            edgecolors='black',
+            linewidth=2,
+            label='当該企業',
+            zorder=5
+        )
+        
+        # 企業名と年度をアノテーション
+        plt.annotate(
+            f"{target_code}\n({target_data['year']}年)",
+            xy=(target_data['UMAP1'], target_data['UMAP2']),
+            xytext=(10, 10),
+            textcoords='offset points',
+            fontsize=10,
+            fontweight='bold',
+            fontproperties=font_prop,
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7)
+        )
+    
+    # 軸ラベル
+    plt.xlabel('UMAP 次元1', fontproperties=font_prop, fontsize=12)
+    plt.ylabel('UMAP 次元2', fontproperties=font_prop, fontsize=12)
+    plt.title('企業の財務特性に基づくクラスタリング分析（UMAP）', fontproperties=font_prop, fontsize=14, fontweight='bold')
+    
+    # 凡例
+    plt.legend(prop=font_prop, loc='upper right')
+    
+    # グリッドスタイル
+    plt.grid(True, alpha=0.3)
+    
+    # 説明テキスト
+    description_text = f"""
+使用特徴量: {', '.join([f['name'] for f in umap_interpretation['features_used']])}
+次元削減手法: {umap_interpretation['method']}
+クラスタリング: K-means (k=3)
+    """
+    
+    plt.figtext(0.02, 0.02, description_text, fontsize=8, fontproperties=font_prop,
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Base64エンコード
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight')
+    buffer.seek(0)
+    image_png = buffer.getvalue()
+    buffer.close()
+    plt.close()
+    
+    return base64.b64encode(image_png).decode('utf-8')
 
 
 def create_cluster_pca_chart(X_pca, labels, index, year_dict, target_code, pca_interpretation, variance_ratio):

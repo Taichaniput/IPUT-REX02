@@ -215,8 +215,15 @@ def prepare_cluster_summary(cluster_info):
         companies = [comp['name'] for comp in cluster_info['same_cluster_companies'][:5]]
         summary += f"\n同クラスタの類似企業: {', '.join(companies)}\n"
     
-    # PCA解釈情報
-    if 'pca_interpretation' in cluster_info:
+    # UMAP解釈情報
+    if 'umap_interpretation' in cluster_info:
+        umap_info = cluster_info['umap_interpretation']
+        summary += f"\n{umap_info['method']}による次元削減解釈:\n"
+        summary += f"- {umap_info['description']}\n"
+        for advantage in umap_info['advantages']:
+            summary += f"- {advantage}\n"
+    # 下位互換性のためのPCA解釈情報（レガシー対応）
+    elif 'pca_interpretation' in cluster_info:
         summary += "\n主成分分析による解釈:\n"
         for comp in cluster_info['pca_interpretation']:
             summary += f"- 第{comp['component']}主成分({comp['meaning']}): 寄与率{comp['variance_ratio']:.1f}%\n"
@@ -242,10 +249,10 @@ def build_comprehensive_analysis_prompt(company_name, financial_summary, predict
 ## 財務データ
 {financial_summary}
 
-## 成長予測（3シナリオ）
+## 成長予測（ARIMAベース3シナリオ）
 {prediction_summary}
 
-## 業界ポジショニング・クラスタリング分析
+## 業界ポジショニング・クラスタリング分析（UMAPベース）
 {cluster_summary}
 
 ## 外部情報（検索結果）
@@ -555,51 +562,58 @@ def prepare_chart_data(prediction_results, chart_type):
 
 
 def build_scenario_analysis_prompt(company_name, chart_data, chart_type):
-    """3シナリオ分析用のプロンプトを構築"""
+    """ARIMAベース3シナリオ分析用のプロンプトを構築"""
     chart_label = "売上高" if chart_type == 'sales' else "純利益"
     
     prompt = f"""
-あなたは情報系学生の就活支援を専門とする企業分析アナリストです。以下の企業について、{chart_label}予測グラフに基づく3シナリオ分析を行ってください。
+あなたは情報系学生の就活支援を専門とする企業分析アナリストです。以下の企業について、ARIMA時系列モデルによる{chart_label}予測グラフに基づく3シナリオ分析を行ってください。
 
 ## 分析対象企業
 {company_name}
 
-## {chart_label}予測データ
+## {chart_label}予測データ（ARIMAモデル + 統計手法ハイブリッド予測）
 {chart_data}
 
+## 予測手法について
+- **ARIMA時系列モデル**: 企業の過去データから時系列パターンを学習し、将来の予測値と信頼区間を算出
+- **ハイブリッド手法**: ARIMAと従来統計手法を組み合わせることで予測精度を向上
+- **3シナリオ構成**: 楽観(信頼区間上限)、現状(予測中央値)、悲観(信頼区間下限)
+
 ## 指示
-上記の{chart_label}予測データを基に、情報系学生のキャリア形成の観点から3つのシナリオ分析を行ってください。必ず以下の形式で出力してください。
+上記のARIMAベース{chart_label}予測データを基に、情報系学生のキャリア形成の観点から3つのシナリオ分析を行ってください。必ず以下の形式で出力してください。
 
 [OPTIMISTIC_SCENARIO]
-楽観シナリオ（150-200文字程度）：
-・{chart_label}成長の主要要因（DX推進、新技術導入、規制緩和など）
-・技術革新による事業機会（AI、IoT、クラウドなど）
-・デジタル変革による競争優位性向上
-・情報系人材の採用拡大と成長への寄与
+楽観シナリオ（ARIMA信頼区間上限、150文字程度）：
+・ARIMAモデルが予測する最良のケースでの{chart_label}成長
+・時系列パターンから見た上振れ要因（DX推進、新技術導入、市場拡大）
+・技術革新による事業機会の最大化（AI、IoT、クラウド活用）
+・情報系人材の積極採用と技術力向上による競争優位性確立
 [/OPTIMISTIC_SCENARIO]
 
 [CURRENT_SCENARIO]
-現状シナリオ（150-200文字程度）：
-・現在のトレンド継続による安定成長
-・既存事業の着実な拡大
-・技術投資とROIのバランス
-・市場での安定的なポジション維持
+現状シナリオ（ARIMA予測中央値、150文字程度）：
+・ARIMAモデルによる最も可能性の高い{chart_label}成長予測
+・過去の時系列パターンに基づく安定的な事業拡大
+・既存技術と新技術のバランスの良い投資継続
+・市場ポジション維持と漸進的な技術力向上
 [/CURRENT_SCENARIO]
 
 [PESSIMISTIC_SCENARIO]
-悲観シナリオ（150-200文字程度）：
-・市場縮小・競合激化のリスク
-・技術的遅れによる競争力低下
-・デジタル変革の遅れ
-・人材確保困難による成長制約
+悲観シナリオ（ARIMA信頼区間下限、150文字程度）：
+・ARIMAモデルが予測するリスクシナリオでの{chart_label}成長
+・時系列分析から見た下振れ要因（市場競合激化、技術変化対応遅れ）
+・デジタル変革の遅れによる競争力低下
+・人材確保困難と技術投資不足による成長制約
 [/PESSIMISTIC_SCENARIO]
 
-各シナリオは具体的で実用的な内容にし、特に情報系学生の視点から技術的成長機会、キャリア形成、業界トレンドを重視した分析を行ってください。
+各シナリオは、ARIMAモデルの予測に基づく具体的で実用的な内容にし、特に情報系学生の視点から技術的成長機会、キャリア形成、業界トレンドを重視した分析を行ってください。
 
-## 分析時の重要な視点
-- プログラミング言語、開発環境、技術スタックの言及
-- エンジニアの成長環境（研修制度、勉強会、技術コミュニティ）
-- 将来性の高い技術分野（AI、IoT、クラウド、DX）への取り組み
+## 分析時の重要な視点（ARIMAベース予測考慮）
+- **時系列分析の優位性**: 従来の単純統計より精密な予測による成長性評価
+- **信頼区間の解釈**: 予測の不確実性を考慮したリスク評価とキャリア戦略
+- **技術スタックと成長性**: プログラミング言語、開発環境がARIMA予測にどう影響するか
+- **エンジニア成長環境**: 時系列データから見える技術投資トレンドと人材育成
+- **将来技術への対応**: ARIMA予測から読み取る次世代技術（AI、IoT、クラウド）投資動向
 - 情報系学生が活躍できる職種・部門の具体的な説明
 - 業界内での技術力・イノベーション力の客観的評価
 - 長期的なキャリア形成の可能性（昇進、転職市場価値）

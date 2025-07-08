@@ -19,6 +19,8 @@ psycopg2-binary>=2.9.7              # PostgreSQL adapter
 pandas==2.1.3                       # データ分析・操作
 numpy==1.26.3                       # 数値計算
 scikit-learn==1.4.2                 # 機械学習ライブラリ
+umap-learn==0.5.3                   # UMAP次元削減
+statsmodels==0.14.2                 # ARIMAモデルなど統計モデリング
 
 # =============================================================================
 # VISUALIZATION
