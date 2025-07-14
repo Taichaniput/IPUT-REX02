@@ -51,6 +51,10 @@ def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data
     """Gemini APIを使用して包括的な企業分析を生成"""
     from django.conf import settings
     
+    # デバッグモードの場合は固定データを返す
+    if getattr(settings, 'AI_DEBUG_MODE', False):
+        return _generate_debug_analysis()
+    
     if not settings.GEMINI_API_KEY:
         return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
     
@@ -102,17 +106,59 @@ def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data
         return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
 
 
+def _generate_debug_analysis():
+    """デバッグ用の固定分析データ"""
+    print("--- [DEBUG] Skipping external API calls and returning dummy data. ---")
+    return {
+        'FINANCIAL_ANALYSIS': '【デバッグ】財務分析データを表示します。API呼び出しはスキップされました。',
+        'COMPANY_OVERVIEW': '【デバッグ】企業概要を表示します。Tavily API呼び出しはスキップされました。',
+        'SALES_SCENARIOS': {
+            'optimistic': '【デバッグ】売上高（楽観）シナリオです。',
+            'current': '【デバッグ】売上高（現状）シナリオです。',
+            'pessimistic': '【デバッグ】売上高（悲観）シナリオです。'
+        },
+        'PROFIT_SCENARIOS': {
+            'optimistic': '【デバッグ】純利益（楽観）シナリオです。',
+            'current': '【デバッグ】純利益（現状）シナリオです。',
+            'pessimistic': '【デバッグ】純利益（悲観）シナリオです。'
+        },
+        'CHART_SALES_SCENARIOS': {
+            'optimistic': '【デバッグ】グラフ用売上高（楽観）',
+            'current': '【デバッグ】グラフ用売上高（現状）',
+            'pessimistic': '【デバッグ】グラフ用売上高（悲観）'
+        },
+        'CHART_PROFIT_SCENARIOS': {
+            'optimistic': '【デバッグ】グラフ用純利益（楽観）',
+            'current': '【デバッグ】グラフ用純利益（現状）',
+            'pessimistic': '【デバッグ】グラフ用純利益（悲観）'
+        },
+        'POSITIONING_ANALYSIS': '【デバッグ】ポジショニング分析を表示します。',
+        'SUMMARY': '【デバッグ】総括・キャリア分析を表示します。'
+    }
+
+
 def create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info):
-    """API利用できない場合のフォールバック分析"""
+    """API利用できない場合のフォールバック分析（事前学習済みモデル対応）"""
     analysis = {}
     
+    # 予測・クラスタリングデータが不足している場合は事前学習済みモデルで生成
+    if not prediction_results and financial_data:
+        edinet_code = _extract_edinet_code(financial_data)
+        if edinet_code:
+            print(f"Fallback: generating predictions for {edinet_code}")
+            prediction_results = generate_fast_predictions(edinet_code, financial_data)
+    
+    if not cluster_info and financial_data:
+        edinet_code = _extract_edinet_code(financial_data)
+        if edinet_code:
+            print(f"Fallback: generating clustering for {edinet_code}")
+            cluster_info = generate_fast_clustering(edinet_code)
+
     # 基本的な財務分析
     if financial_data:
-        # financial_dataは辞書のリスト形式 [{'data': FinancialData, 'indicators': dict}, ...]
         if isinstance(financial_data[0], dict) and 'data' in financial_data[0]:
             latest = financial_data[0]['data']
         else:
-            # 直接FinancialDataオブジェクトの場合
             latest = financial_data[0]
         
         net_sales = (latest.net_sales or 0) / 100000000
@@ -162,6 +208,41 @@ def create_fallback_analysis(company_name, financial_data, prediction_results, c
     return analysis
 
 
+def _extract_edinet_code(financial_data):
+    """財務データから企業コードを抽出するヘルパー関数"""
+    if not financial_data:
+        return None
+        
+    if isinstance(financial_data[0], dict) and 'data' in financial_data[0]:
+        return financial_data[0]['data'].edinet_code
+    elif hasattr(financial_data[0], 'edinet_code'):
+        return financial_data[0].edinet_code
+    
+    return None
+
+
+def generate_fast_predictions(edinet_code, financial_data):
+    """事前学習済みモデルを使用した高速予測生成"""
+    try:
+        from .ml_analytics import perform_predictions
+        print(f"Generating fast predictions for {edinet_code}...")
+        return perform_predictions(financial_data, method='arima', edinet_code=edinet_code)
+    except Exception as e:
+        print(f"Fast prediction generation failed: {e}")
+        return {}
+
+
+def generate_fast_clustering(edinet_code):
+    """事前学習済みモデルを使用した高速クラスタリング生成"""
+    try:
+        from .ml_analytics import get_company_cluster_info
+        print(f"Generating fast clustering for {edinet_code}...")
+        return get_company_cluster_info(edinet_code)
+    except Exception as e:
+        print(f"Fast clustering generation failed: {e}")
+        return None
+
+
 def prepare_financial_summary(financial_data):
     """財務データを要約"""
     if not financial_data:
@@ -169,7 +250,6 @@ def prepare_financial_summary(financial_data):
     
     summary = []
     for item in financial_data[:3]:  # 最新3年分
-        # itemが辞書の場合とFinancialDataオブジェクトの場合を処理
         if isinstance(item, dict) and 'data' in item:
             fd = item['data']
         else:
@@ -249,7 +329,7 @@ def build_comprehensive_analysis_prompt(company_name, financial_summary, predict
 ## 財務データ
 {financial_summary}
 
-## 成長予測（ARIMAベース3シナリオ）
+## 成長予測（ARIMA時系列モデル3シナリオ）
 {prediction_summary}
 
 ## 業界ポジショニング・クラスタリング分析（UMAPベース）
@@ -449,87 +529,14 @@ def generate_scenario_analysis(company_name, edinet_code, prediction_results, ch
 
 
 def create_fallback_scenario_analysis(company_name, chart_type):
-    """グラフ用シナリオ分析のフォールバック"""
-    if chart_type == 'sales':
-        return {
-            'optimistic': "デジタル変革の進展により、AI・IoT・クラウド技術の活用拡大で新事業機会創出と市場シェア拡大が期待されます。",
-            'current': "現在の事業基盤を維持しながら、技術投資とROIのバランスを保ち、売上高の着実な成長が予想されます。",
-            'pessimistic': "競合他社の技術革新により相対的な競争力低下のリスクがあり、市場シェア低下により売上成長に制約が生じる可能性があります。"
-        }
-    elif chart_type == 'profit':
-        return {
-            'optimistic': "業務プロセスの自動化・効率化によりコスト削減を実現し、高付加価値サービス拡大により利益率向上が期待されます。",
-            'current': "現在の収益構造を維持しながら、適度な技術投資により収益性を保持し、持続的な成長を支える見通しです。",
-            'pessimistic': "人件費や技術投資の増大により収益性に圧力がかかり、価格競争の激化により利益率低下が懸念されます。"
-        }
-    else:
-        return {
-            'optimistic': "詳細な分析はAI機能をご利用ください。",
-            'current': "詳細な分析はAI機能をご利用ください。",
-            'pessimistic': "詳細な分析はAI機能をご利用ください。"
-        }
-
-
-def prepare_chart_data(prediction_results, chart_type):
-    """グラフ用データを整理"""
-    if not prediction_results:
-        return "予測データが不足しています。"
+    """API利用できない場合の3シナリオ分析フォールバック"""
+    chart_label = "売上高" if chart_type == 'sales' else "純利益"
     
-    if chart_type == 'sales' and 'net_sales' in prediction_results:
-        return f"売上高予測データ: {prediction_results['net_sales']}"
-    elif chart_type == 'profit' and 'net_income' in prediction_results:
-        return f"純利益予測データ: {prediction_results['net_income']}"
-    else:
-        return "予測データが不足しています。"
-
-
-def build_scenario_analysis_prompt(company_name, chart_data, chart_type):
-    """シナリオ分析用プロンプト構築"""
-    metric_name = "売上高" if chart_type == 'sales' else "純利益"
-    
-    prompt = f"""
-{company_name}の{metric_name}予測グラフに基づいて、以下の3つのシナリオ分析を行ってください。
-
-予測データ:
-{chart_data}
-
-各シナリオについて、情報系学生の視点から技術的要因を重視した分析を行い、
-120-150文字程度で簡潔に分析してください。
-
-[OPTIMISTIC]
-楽観シナリオ分析（技術革新・市場拡大要因を重視）
-[/OPTIMISTIC]
-
-[CURRENT]
-現状維持シナリオ分析（現在の事業基盤・技術投資を重視）
-[/CURRENT]
-
-[PESSIMISTIC]
-悲観シナリオ分析（競合・技術的リスクを重視）
-[/PESSIMISTIC]
-
-各シナリオは具体的で実用的な内容にし、特に情報系学生の視点から技術的成長機会、
-業界トレンドを重視した分析を行ってください。
-"""
-    return prompt
-
-
-def parse_scenario_analysis(response_text):
-    """シナリオ分析レスポンスを解析"""
-    scenarios = {}
-    
-    try:
-        scenarios['optimistic'] = extract_section(response_text, 'OPTIMISTIC')
-        scenarios['current'] = extract_section(response_text, 'CURRENT')
-        scenarios['pessimistic'] = extract_section(response_text, 'PESSIMISTIC')
-        
-    except Exception as e:
-        print(f"Scenario parsing error: {e}")
-        scenarios = {
-            'optimistic': "分析中...",
-            'current': "分析中...",
-            'pessimistic': "分析中..."
-        }
+    scenarios = {
+        'optimistic': f"デジタル変革の進展により、AI・IoT・クラウド技術の活用が拡大し、新たな事業機会の創出と{chart_label}の大幅な成長が期待されます。情報系人材の積極採用により技術力向上が見込まれ、高付加価値サービスの展開で収益性も向上する可能性があります。",
+        'current': f"現在の事業基盤を維持しながら、安定的な{chart_label}成長を継続する見通しです。技術投資とROIのバランスを保ちつつ、市場での競争力を維持していくと予想されます。既存の技術スタックを活用した着実な成長が見込まれます。",
+        'pessimistic': f"競合他社の技術革新により相対的な競争力低下のリスクがあり、{chart_label}の成長に制約が生じる可能性があります。デジタル変革の遅れや優秀な人材確保の困難により、市場シェアの縮小や収益性の悪化が懸念されます。"
+    }
     
     return scenarios
 
@@ -571,12 +578,12 @@ def build_scenario_analysis_prompt(company_name, chart_data, chart_type):
 ## 分析対象企業
 {company_name}
 
-## {chart_label}予測データ（ARIMAモデル + 統計手法ハイブリッド予測）
+## {chart_label}予測データ（ARIMAモデル単体予測）
 {chart_data}
 
 ## 予測手法について
 - **ARIMA時系列モデル**: 企業の過去データから時系列パターンを学習し、将来の予測値と信頼区間を算出
-- **ハイブリッド手法**: ARIMAと従来統計手法を組み合わせることで予測精度を向上
+- **パラメータ**: order=(1,1,1)固定による安定した予測
 - **3シナリオ構成**: 楽観(信頼区間上限)、現状(予測中央値)、悲観(信頼区間下限)
 
 ## 指示
@@ -609,11 +616,11 @@ def build_scenario_analysis_prompt(company_name, chart_data, chart_type):
 各シナリオは、ARIMAモデルの予測に基づく具体的で実用的な内容にし、特に情報系学生の視点から技術的成長機会、キャリア形成、業界トレンドを重視した分析を行ってください。
 
 ## 分析時の重要な視点（ARIMAベース予測考慮）
-- **時系列分析の優位性**: 従来の単純統計より精密な予測による成長性評価
-- **信頼区間の解釈**: 予測の不確実性を考慮したリスク評価とキャリア戦略
-- **技術スタックと成長性**: プログラミング言語、開発環境がARIMA予測にどう影響するか
-- **エンジニア成長環境**: 時系列データから見える技術投資トレンドと人材育成
-- **将来技術への対応**: ARIMA予測から読み取る次世代技術（AI、IoT、クラウド）投資動向
+- **時系列分析の優位性**: 統計的に信頼性の高い予測による成長性評価
+- **信頼区間の解釈**: 70%信頼区間による予測の不確実性を考慮したリスク評価
+- **パラメータ安定性**: order=(1,1,1)固定による一貫した予測基準
+- **技術投資トレンド**: ARIMAが捉える企業の研究開発費・設備投資の時系列パターン
+- **将来技術への対応**: 予測データから読み取る次世代技術（AI、IoT、クラウド）投資動向
 - 情報系学生が活躍できる職種・部門の具体的な説明
 - 業界内での技術力・イノベーション力の客観的評価
 - 長期的なキャリア形成の可能性（昇進、転職市場価値）
@@ -633,18 +640,5 @@ def parse_scenario_analysis(response_text):
     except Exception as e:
         print(f"Scenario analysis parsing error: {e}")
         scenarios = {"error": "シナリオ分析の解析中にエラーが発生しました"}
-    
-    return scenarios
-
-
-def create_fallback_scenario_analysis(company_name, chart_type):
-    """API利用できない場合の3シナリオ分析フォールバック"""
-    chart_label = "売上高" if chart_type == 'sales' else "純利益"
-    
-    scenarios = {
-        'optimistic': f"デジタル変革の進展により、AI・IoT・クラウド技術の活用が拡大し、新たな事業機会の創出と{chart_label}の大幅な成長が期待されます。情報系人材の積極採用により技術力向上が見込まれ、高付加価値サービスの展開で収益性も向上する可能性があります。",
-        'current': f"現在の事業基盤を維持しながら、安定的な{chart_label}成長を継続する見通しです。技術投資とROIのバランスを保ちつつ、市場での競争力を維持していくと予想されます。既存の技術スタックを活用した着実な成長が見込まれます。",
-        'pessimistic': f"競合他社の技術革新により相対的な競争力低下のリスクがあり、{chart_label}の成長に制約が生じる可能性があります。デジタル変革の遅れや優秀な人材確保の困難により、市場シェアの縮小や収益性の悪化が懸念されます。"
-    }
     
     return scenarios

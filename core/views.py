@@ -16,10 +16,9 @@ from .forms import UserRegistrationForm, UserProfileForm
 # 分離したモジュールのインポート（src/パッケージから）
 from .src import (
     calculate_financial_indicators,
-    perform_predictions, 
-    get_company_cluster_info,
     generate_comprehensive_ai_analysis
 )
+from .src.ml_analytics import perform_predictions, get_cluster_info
 
 # 3シナリオ分析用のインポート
 from .src.ai_analysis import generate_scenario_analysis
@@ -33,6 +32,7 @@ except ImportError:
 
 # 外部データ取得用
 import requests
+import asyncio
 try:
     from tavily import TavilyClient
     TAVILY_AVAILABLE = True
@@ -272,7 +272,7 @@ def company_detail(request, edinet_code):
             'indicators': indicators
         })
     
-    # 2. 予測分析（複数モデル）- 直接読み込み
+    # 2. 予測分析（複数モデル）
     prediction_results = {}
     if request.user.is_authenticated and len(financial_data) >= 3:
         try:
@@ -280,11 +280,11 @@ def company_detail(request, edinet_code):
         except Exception as e:
             print(f"Prediction error: {e}")
     
-    # 3. クラスタリング分析 - 直接読み込み
+    # 3. クラスタリング分析 - 非同期実行
     cluster_info = None
     if request.user.is_authenticated:
         try:
-            cluster_info = get_company_cluster_info(edinet_code)
+            cluster_info = asyncio.run(get_cluster_info(edinet_code))
         except Exception as e:
             print(f"Clustering error: {e}")
     
@@ -343,7 +343,7 @@ def ai_analysis_ajax(request, edinet_code):
             prediction_results = perform_predictions(financial_data)
         
         # クラスタリング分析
-        cluster_info = get_company_cluster_info(edinet_code)
+        cluster_info = asyncio.run(get_cluster_info(edinet_code))
         
         # AI分析実行
         print(f"Starting AI analysis for {company_name}...")
@@ -506,7 +506,7 @@ def get_clustering_ajax(request, edinet_code):
     #     return JsonResponse({'error': 'ログインが必要です'}, status=401)
     
     try:
-        cluster_info = get_company_cluster_info(edinet_code)
+        cluster_info = asyncio.run(get_cluster_info(edinet_code))
         
         if not cluster_info:
             return JsonResponse({'error': 'クラスタリング分析に必要なデータが不足しています'}, status=400)

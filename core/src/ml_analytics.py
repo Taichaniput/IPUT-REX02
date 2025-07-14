@@ -8,18 +8,16 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.cluster import KMeans
 import hdbscan
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
 import umap
 from statsmodels.tsa.arima.model import ARIMA
 import warnings
 warnings.filterwarnings('ignore')
 import platform
 import os
+import pickle
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from matplotlib.font_manager import FontProperties
 from ..models import FinancialData
 from django.db.models import Max, OuterRef, Subquery
@@ -78,14 +76,14 @@ def perform_predictions(financial_data):
         years = valid_data['fiscal_year'].values
         values = valid_data[metric].values / 100000000  # 億円単位
         
-        # ARIMAベースの予測を試行、失敗時は既存手法にフォールバック
-        scenarios = predict_scenarios_hybrid(years, values)
+        # ARIMA単体での予測
+        scenarios = predict_arima(years, values)
         
         # グラフ生成
-        chart = create_scenario_chart(
+        chart = create_chart(
             years, values, scenarios,
-            f"{get_metric_label(metric)}の3シナリオ予測",
-            get_metric_label(metric) + "（億円）"
+            f"{get_label(metric)}の3シナリオ予測",
+            get_label(metric) + "（億円）"
         )
         
         results[metric] = {
@@ -93,119 +91,69 @@ def perform_predictions(financial_data):
                 'scenarios': scenarios
             },
             'chart': chart,
-            'label': get_metric_label(metric)
+            'label': get_label(metric)
         }
     
     return results
 
 
-def predict_three_scenarios(years, values):
-    """楽観・現状・悲観の3シナリオで予測"""
-    if len(values) < 2:
-        return None
-    
-    # 成長率を計算
-    growth_rates = []
-    for i in range(1, len(values)):
-        if values[i-1] > 0:
-            growth_rate = (values[i] / values[i-1]) - 1
-            growth_rates.append(growth_rate)
-    
-    if not growth_rates:
-        return None
-    
-    # 基本成長率と変動率
-    base_growth = np.median(growth_rates)
-    growth_volatility = np.std(growth_rates) if len(growth_rates) > 1 else 0.1
-    
-    # 3シナリオの成長率
-    optimistic_growth = base_growth + growth_volatility  # 楽観的
-    current_growth = base_growth  # 現状維持
-    pessimistic_growth = base_growth - growth_volatility  # 悲観的
-    
-    # 将来3年の予測値を計算
-    last_value = values[-1]
-    future_years = [years[-1] + i for i in range(1, 4)]
-    
-    scenarios = {
-        'optimistic': {
-            'growth_rate': optimistic_growth * 100,
-            'years': future_years,
-            'values': [last_value * ((1 + optimistic_growth) ** i) for i in range(1, 4)]
-        },
-        'current': {
-            'growth_rate': current_growth * 100,
-            'years': future_years,
-            'values': [last_value * ((1 + current_growth) ** i) for i in range(1, 4)]
-        },
-        'pessimistic': {
-            'growth_rate': pessimistic_growth * 100,
-            'years': future_years,
-            'values': [last_value * ((1 + pessimistic_growth) ** i) for i in range(1, 4)]
-        }
-    }
-    
-    return scenarios
 
 
-def predict_arima_scenarios(years, values):
+def predict_arima(years, values):
     """ARIMAモデルによる3シナリオ予測"""
     try:
-        # データの前処理と検証
         if len(values) < 5:
             return None
         
-        # 欠損値や無効値のチェック
         clean_values = [v for v in values if v is not None and v > 0]
         if len(clean_values) < 5:
             return None
         
-        # ARIMAモデルの学習
-        # order=(1,1,1)は一般的な設定だが、データに応じて調整可能
-        model = ARIMA(clean_values, order=(1, 1, 1))
-        results = model.fit()
+        # 事前学習モデルの読み込みを試行
+        model_key = gen_model_key(clean_values)
+        cached_model = load_model(model_key)
         
-        # 3年先の予測と信頼区間
+        if cached_model:
+            results = cached_model
+        else:
+            model = ARIMA(clean_values, order=(1, 1, 1))
+            results = model.fit()
+            # 新しいモデルを保存
+            save_model(model_key, results)
+        
         forecast = results.get_forecast(steps=3)
         pred_mean = forecast.predicted_mean
-        pred_ci = forecast.conf_int(alpha=0.3)  # 70%信頼区間
+        pred_ci = forecast.conf_int(alpha=0.3)
         
-        # デバッグ: データ型の確認
-        # print(f"pred_mean type: {type(pred_mean)}, pred_ci type: {type(pred_ci)}")
-        
-        # NumPy配列の場合はPandasシリーズに変換
         if isinstance(pred_mean, np.ndarray):
             pred_mean = pd.Series(pred_mean)
         if isinstance(pred_ci, np.ndarray):
             pred_ci = pd.DataFrame(pred_ci)
         
-        # 将来年度の設定
         future_years = [years[-1] + i for i in range(1, 4)]
         
-        # 成長率の計算
-        def calculate_growth_rate(current_val, future_val):
+        def calc_growth_rate(current_val, future_val):
             if current_val > 0:
                 return ((future_val / current_val) - 1) * 100
             return 0
         
         last_value = clean_values[-1]
         
-        # 3シナリオの構築
         scenarios = {
             'optimistic': {
-                'growth_rate': calculate_growth_rate(last_value, pred_ci.iloc[-1, 1]),
+                'growth_rate': calc_growth_rate(last_value, pred_ci.iloc[-1, 1]),
                 'years': future_years,
-                'values': pred_ci.iloc[:, 1].tolist()  # 上限値
+                'values': pred_ci.iloc[:, 1].tolist()
             },
             'current': {
-                'growth_rate': calculate_growth_rate(last_value, pred_mean.iloc[-1]),
+                'growth_rate': calc_growth_rate(last_value, pred_mean.iloc[-1]),
                 'years': future_years,
-                'values': pred_mean.tolist()  # 予測値
+                'values': pred_mean.tolist()
             },
             'pessimistic': {
-                'growth_rate': calculate_growth_rate(last_value, pred_ci.iloc[-1, 0]),
+                'growth_rate': calc_growth_rate(last_value, pred_ci.iloc[-1, 0]),
                 'years': future_years,
-                'values': pred_ci.iloc[:, 0].tolist()  # 下限値
+                'values': pred_ci.iloc[:, 0].tolist()
             }
         }
         
@@ -216,46 +164,63 @@ def predict_arima_scenarios(years, values):
         return None
 
 
-def predict_scenarios_hybrid(years, values):
-    """統計手法とARIMAを組み合わせた予測"""
-    
-    # ARIMAによる予測を試行
-    arima_scenarios = predict_arima_scenarios(years, values)
-    
-    # ARIMAが失敗した場合は既存手法にフォールバック
-    if arima_scenarios is None:
-        return predict_three_scenarios(years, values)
-    
-    # 既存の統計手法による予測
-    statistical_scenarios = predict_three_scenarios(years, values)
-    
-    # 重み付き平均による統合（ARIMA 60%, 統計手法 40%）
-    combined_scenarios = {}
-    for scenario_type in ['optimistic', 'current', 'pessimistic']:
-        arima_values = arima_scenarios[scenario_type]['values']
-        stat_values = statistical_scenarios[scenario_type]['values']
+async def predict_metric(metric, years, values):
+    """指標の非同期予測"""
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as executor:
+        scenarios = await loop.run_in_executor(executor, predict_arima, years, values)
         
-        # 重み付き平均
-        combined_values = [
-            0.6 * arima_val + 0.4 * stat_val 
-            for arima_val, stat_val in zip(arima_values, stat_values)
-        ]
-        
-        # 成長率の再計算
-        last_value = values[-1]
-        final_value = combined_values[-1]
-        combined_growth_rate = ((final_value / last_value) ** (1/3) - 1) * 100 if last_value > 0 else 0
-        
-        combined_scenarios[scenario_type] = {
-            'growth_rate': combined_growth_rate,
-            'years': arima_scenarios[scenario_type]['years'],
-            'values': combined_values
-        }
-    
-    return combined_scenarios
+        if scenarios:
+            chart = await loop.run_in_executor(
+                executor, 
+                create_chart,
+                years, values, scenarios,
+                f"{get_label(metric)}の3シナリオ予測",
+                get_label(metric) + "（億円）"
+            )
+            
+            return {
+                'metric': metric,
+                'data': {
+                    'predictions': {'scenarios': scenarios},
+                    'chart': chart,
+                    'label': get_label(metric)
+                }
+            }
+    return None
 
 
-def create_scenario_chart(actual_years, actual_values, scenarios, title, ylabel):
+def gen_model_key(values):
+    """データからモデルキーを生成"""
+    import hashlib
+    data_str = ','.join([f"{v:.2f}" for v in values])
+    return hashlib.md5(data_str.encode()).hexdigest()[:16]
+
+
+def load_model(model_key):
+    """事前学習済みARIMAモデルの読み込み"""
+    try:
+        model_path = f"arima_cache/{model_key}.pkl"
+        if os.path.exists(model_path):
+            with open(model_path, 'rb') as f:
+                return pickle.load(f)
+    except Exception as e:
+        print(f"Model loading error: {e}")
+    return None
+
+
+def save_model(model_key, model):
+    """ARIMAモデルの保存"""
+    try:
+        os.makedirs('arima_cache', exist_ok=True)
+        model_path = f"arima_cache/{model_key}.pkl"
+        with open(model_path, 'wb') as f:
+            pickle.dump(model, f)
+    except Exception as e:
+        print(f"Model saving error: {e}")
+
+
+def create_chart(actual_years, actual_values, scenarios, title, ylabel):
     """3シナリオ予測結果のグラフを生成"""
     font_prop = FontProperties(fname=FONT_PATH)
     
@@ -298,8 +263,15 @@ def create_scenario_chart(actual_years, actual_values, scenarios, title, ylabel)
     return base64.b64encode(buf.read()).decode('utf-8')
 
 
-def get_company_cluster_info(edinet_code):
-    """企業のクラスタ情報を取得（PCA使用）"""
+async def get_cluster_info(edinet_code):
+    """企業のクラスタ情報を非同期取得"""
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as executor:
+        return await loop.run_in_executor(executor, _get_cluster_sync, edinet_code)
+
+
+def _get_cluster_sync(edinet_code):
+    """企業のクラスタ情報を取得（同期版）"""
     try:
         # 各企業の最新年度を取得するサブクエリ
         latest_year_subquery = FinancialData.objects.filter(
@@ -401,10 +373,10 @@ def get_company_cluster_info(edinet_code):
         top_features = relative_strengths.abs().nlargest(3).index.tolist()
         
         # UMAPの解釈
-        umap_interpretation = interpret_umap_components(FEATURES)
+        umap_interpretation = interpret_umap(FEATURES)
         
         # グラフ生成
-        chart = create_cluster_umap_chart(
+        chart = create_cluster_chart(
             X_umap, labels, df_filled.index, df_filled['fiscal_year'].to_dict(),
             edinet_code, umap_interpretation
         )
@@ -468,7 +440,7 @@ def interpret_pca_components(pca, features):
     return interpretations
 
 
-def interpret_umap_components(features):
+def interpret_umap(features):
     """UMAP + HDBSCAN解釈"""
     feature_labels = [get_feature_label(f) for f in features]
     
@@ -497,7 +469,7 @@ def interpret_umap_components(features):
     return interpretation
 
 
-def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, umap_interpretation):
+def create_cluster_chart(X_umap, labels, index, year_dict, target_code, umap_interpretation):
     """UMAP空間でのクラスタマップ"""
     # フォント設定
     font_prop = FontProperties(fname=FONT_PATH)
@@ -576,7 +548,7 @@ def create_cluster_umap_chart(X_umap, labels, index, year_dict, target_code, uma
     plt.title('企業の財務特性に基づくクラスタリング分析', fontproperties=font_prop, fontsize=14, fontweight='bold')
     
     # 凡例
-    plt.legend(prop=font_prop, loc='upper right')
+    plt.legend(prop=font_prop, loc='upper left')
     
     # グリッドスタイル
     plt.grid(True, alpha=0.3)
@@ -697,7 +669,7 @@ def create_cluster_pca_chart(X_pca, labels, index, year_dict, target_code, pca_i
     return base64.b64encode(buf.read()).decode('utf-8')
 
 
-def get_metric_label(metric):
+def get_label(metric):
     """指標名の日本語ラベル"""
     labels = {
         'net_sales': '売上高',

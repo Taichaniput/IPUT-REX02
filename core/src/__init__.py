@@ -9,12 +9,12 @@
 """
 
 from .financial_utils import calculate_financial_indicators
-from .ml_analytics import perform_predictions, get_company_cluster_info
+from .ml_analytics import perform_predictions, get_cluster_info
 from .ai_analysis import generate_comprehensive_ai_analysis
 
 __all__ = [
     'calculate_financial_indicators',
     'perform_predictions', 
-    'get_company_cluster_info',
+    'get_cluster_info',
     'generate_comprehensive_ai_analysis'
 ]
