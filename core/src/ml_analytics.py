@@ -404,42 +404,6 @@ def _get_cluster_sync(edinet_code):
         print(f"Cluster analysis error: {e}")
         return None
 
-
-def interpret_pca_components(pca, features):
-    """PCA主成分の解釈"""
-    components = pca.components_
-    feature_labels = [get_feature_label(f) for f in features]
-    
-    interpretations = []
-    for i, component in enumerate(components):
-        # 各主成分で重要な特徴量を特定
-        abs_component = np.abs(component)
-        top_indices = np.argsort(abs_component)[-3:][::-1]  # 上位3つ
-        
-        interpretation = {
-            'component': i + 1,
-            'variance_ratio': pca.explained_variance_ratio_[i] * 100,
-            'top_features': []
-        }
-        
-        for idx in top_indices:
-            interpretation['top_features'].append({
-                'name': feature_labels[idx],
-                'weight': component[idx],
-                'abs_weight': abs_component[idx]
-            })
-        
-        # 主成分の意味を推定
-        if i == 0:
-            interpretation['meaning'] = '企業規模'  # 通常、第1主成分は規模を表す
-        elif i == 1:
-            interpretation['meaning'] = '収益性・効率性'  # 第2主成分は収益性など
-        
-        interpretations.append(interpretation)
-    
-    return interpretations
-
-
 def interpret_umap(features):
     """UMAP + HDBSCAN解釈"""
     feature_labels = [get_feature_label(f) for f in features]
