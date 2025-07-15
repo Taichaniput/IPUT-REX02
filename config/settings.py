@@ -150,7 +150,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Google Gemini API設定
 GEMINI_API_KEY = os.environ.get('GOOGLE_API_KEY')
-GEMINI_MODEL = 'gemini-1.5-flash'
+GEMINI_MODEL = 'gemini-2.5-flash'
 
 # Tavily API設定
 TAVILY_API_KEY = os.environ.get('TAVILY_API_KEY')
