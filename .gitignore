@@ -56,3 +56,5 @@ fonts/*.ttf
 **.json
 
 test**
+
+**.pkl
