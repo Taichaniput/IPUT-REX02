@@ -72,13 +72,17 @@ function showLoadingState() {
     const submitButton = document.querySelector('.search-form button[type="submit"]');
     if (submitButton) {
         submitButton.disabled = true;
-        submitButton.textContent = '検索中...';
+        submitButton.innerHTML = '<span class="loading-spinner-inline"></span> 検索中...';
         
-        // 3秒後にボタンを元に戻す（タイムアウト対策）
+        // ページ全体にローディングオーバーレイを表示
+        showPageLoadingOverlay('企業データを検索中...');
+        
+        // 10秒後にボタンを元に戻す（タイムアウト対策）
         setTimeout(() => {
             submitButton.disabled = false;
             submitButton.textContent = '検索';
-        }, 3000);
+            hidePageLoadingOverlay();
+        }, 10000);
     }
 }
 
@@ -98,8 +102,9 @@ function enhanceCompanyLinks() {
             this.style.transform = 'translateX(0)';
         });
         
-        // クリック時のフィードバック
-        link.addEventListener('click', function() {
+        // クリック時のローディング表示
+        link.addEventListener('click', function(e) {
+            showCompanyDetailLoading(this);
             showMessage('企業詳細を読み込んでいます...', 'info');
         });
     });
@@ -132,6 +137,69 @@ function enhanceCTAButtons() {
             }, 600);
         });
     });
+}
+
+/**
+ * 企業詳細ページへのナビゲーション時のローディング表示
+ * @param {HTMLElement} linkElement - クリックされたリンク要素
+ */
+function showCompanyDetailLoading(linkElement) {
+    // クリックされたリンクをローディング状態に
+    const originalContent = linkElement.innerHTML;
+    linkElement.style.opacity = '0.6';
+    linkElement.style.pointerEvents = 'none';
+    
+    // ローディングアイコンを追加
+    const companyInfo = linkElement.querySelector('.company-info');
+    if (companyInfo) {
+        const loadingIcon = document.createElement('span');
+        loadingIcon.className = 'loading-spinner-inline';
+        loadingIcon.style.marginLeft = '10px';
+        companyInfo.appendChild(loadingIcon);
+    }
+    
+    // ページ全体にローディングオーバーレイを表示
+    showPageLoadingOverlay('企業詳細ページを読み込み中...');
+}
+
+/**
+ * ページ全体のローディングオーバーレイを表示
+ * @param {string} message - 表示するメッセージ
+ */
+function showPageLoadingOverlay(message = '読み込み中...') {
+    // 既存のオーバーレイを削除
+    hidePageLoadingOverlay();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'page-loading-overlay';
+    overlay.className = 'page-loading-overlay';
+    overlay.innerHTML = `
+        <div class="loading-content">
+            <div class="loading-spinner-large"></div>
+            <h3>${message}</h3>
+            <p>しばらくお待ちください...</p>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // フェードイン効果
+    setTimeout(() => {
+        overlay.classList.add('show');
+    }, 10);
+}
+
+/**
+ * ページ全体のローディングオーバーレイを隠す
+ */
+function hidePageLoadingOverlay() {
+    const overlay = document.getElementById('page-loading-overlay');
+    if (overlay) {
+        overlay.classList.remove('show');
+        setTimeout(() => {
+            overlay.remove();
+        }, 300);
+    }
 }
 
 /**
@@ -182,8 +250,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// リップル効果用のCSS（動的に追加）
-const rippleCSS = `
+// リップル効果と追加のローディングCSS（動的に追加）
+const dynamicCSS = `
 .ripple {
     position: absolute;
     border-radius: 50%;
@@ -205,9 +273,88 @@ mark {
     padding: 2px 4px;
     border-radius: 3px;
 }
+
+/* ローディングスピナー */
+.loading-spinner-inline {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.loading-spinner-large {
+    width: 60px;
+    height: 60px;
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ページローディングオーバーレイ */
+.page-loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.page-loading-overlay.show {
+    opacity: 1;
+}
+
+.loading-content {
+    text-align: center;
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 40px;
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.loading-content h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.loading-content p {
+    margin: 0;
+    opacity: 0.8;
+    font-size: 1rem;
+}
 `;
 
 // CSSを動的に追加
 const style = document.createElement('style');
-style.textContent = rippleCSS;
+style.textContent = dynamicCSS;
 document.head.appendChild(style);
+
+// ページ離脱時の処理
+window.addEventListener('beforeunload', function() {
+    hidePageLoadingOverlay();
+});
+
+// ページが完全に読み込まれた時の処理
+window.addEventListener('load', function() {
+    hidePageLoadingOverlay();
+});

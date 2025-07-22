@@ -47,8 +47,8 @@ def get_company_additional_info(company_name):
     return additional_info
 
 
-def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data, prediction_results, cluster_info):
-    """Gemini APIを使用して包括的な企業分析を生成"""
+def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data, prediction_results, cluster_info, positioning_info=None):
+    """Gemini APIを使用して包括的な企業分析を生成（二軸分析統合版）"""
     from django.conf import settings
     
     # デバッグモードの場合は固定データを返す
@@ -56,7 +56,7 @@ def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data
         return _generate_debug_analysis()
     
     if not settings.GEMINI_API_KEY:
-        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
+        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info, positioning_info)
     
     try:
         import google.generativeai as genai
@@ -75,10 +75,13 @@ def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data
         # クラスタデータを整理
         cluster_summary = prepare_cluster_summary(cluster_info)
         
-        # Geminiプロンプトを構築
+        # 二軸分析データを整理
+        positioning_summary = prepare_positioning_summary(positioning_info)
+        
+        # Geminiプロンプトを構築（二軸分析統合版）
         prompt = build_comprehensive_analysis_prompt(
             company_name, financial_summary, prediction_summary, 
-            cluster_summary, additional_info
+            cluster_summary, additional_info, positioning_summary
         )
         
         # Gemini APIに送信
@@ -103,7 +106,7 @@ def generate_comprehensive_ai_analysis(company_name, edinet_code, financial_data
         
     except Exception as e:
         print(f"AI analysis generation error: {e}")
-        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info)
+        return create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info, positioning_info)
 
 
 def _generate_debug_analysis():
@@ -137,7 +140,7 @@ def _generate_debug_analysis():
     }
 
 
-def create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info):
+def create_fallback_analysis(company_name, financial_data, prediction_results, cluster_info, positioning_info=None):
     """API利用できない場合のフォールバック分析（事前学習済みモデル対応）"""
     analysis = {}
     
@@ -162,7 +165,16 @@ def create_fallback_analysis(company_name, financial_data, prediction_results, c
             latest = financial_data[0]
         
         net_sales = (latest.net_sales or 0) / 100000000
-        analysis['FINANCIAL_ANALYSIS'] = f"{company_name}は{latest.fiscal_year}年に売上高{net_sales:.1f}億円を記録。財務の安定性と成長性を評価するためにはAI分析をご利用ください。"
+        
+        # 二軸分析情報を含む財務分析
+        financial_text = f"{company_name}は{latest.fiscal_year}年に売上高{net_sales:.1f}億円を記録。"
+        if positioning_info:
+            quadrant_info = positioning_info.get('quadrant_info', {})
+            financial_text += f"二軸分析では{quadrant_info.get('name', '不明')}に分類され、{quadrant_info.get('career_advice', 'AI分析をご利用ください。')}"
+        else:
+            financial_text += "財務の安定性と成長性を評価するためにはAI分析をご利用ください。"
+        
+        analysis['FINANCIAL_ANALYSIS'] = financial_text
     else:
         analysis['FINANCIAL_ANALYSIS'] = f"{company_name}の詳細な財務分析を表示するためには、API接続が必要です。"
     
@@ -193,14 +205,36 @@ def create_fallback_analysis(company_name, financial_data, prediction_results, c
         'pessimistic': "人件費や技術投資の増大により収益性に圧力がかかり、価格競争の激化により利益率低下が懸念されます。"
     }
     
-    # ポジショニング分析
-    if cluster_info:
+    # ポジショニング分析（二軸分析統合）
+    if positioning_info:
+        quadrant_info = positioning_info.get('quadrant_info', {})
+        growth_score = positioning_info.get('growth_score', 0)
+        stability_score = positioning_info.get('stability_score', 0)
+        
+        analysis['POSITIONING_ANALYSIS'] = f"""
+        二軸分析結果: {quadrant_info.get('name', '不明')}（成長性{growth_score:.1f}点、安定性{stability_score:.1f}点）
+        
+        企業分類: {quadrant_info.get('description', '')}
+        推奨度: {quadrant_info.get('recommendation', '')}
+        リスクレベル: {quadrant_info.get('risk_level', '')}
+        
+        キャリアアドバイス: {quadrant_info.get('career_advice', '')}
+        
+        詳細な技術力評価、デジタル変革への取り組み状況については、AI分析で詳細をご確認ください。
+        """
+    elif cluster_info:
         analysis['POSITIONING_ANALYSIS'] = f"クラスタ{cluster_info['cluster_id']}に分類され、同業他社との比較において独自のポジションを占めています。技術力とイノベーション力の詳細な評価、デジタル変革への取り組み状況については、AI分析で詳細をご確認ください。"
     else:
         analysis['POSITIONING_ANALYSIS'] = "業界内でのポジショニング分析、競争優位性の評価、技術力の詳細な比較分析には、AI機能による包括的な分析が必要です。"
     
-    # 総括・キャリア分析
-    analysis['SUMMARY'] = f"{company_name}は情報系学生にとって技術的な成長機会を提供する可能性が高い企業です。エンジニアとしてのキャリアパス、スキル習得環境、長期的なキャリア展望についての詳細な分析は、AI機能をご利用ください。"
+    # 総括・キャリア分析（二軸分析統合）
+    if positioning_info:
+        quadrant_info = positioning_info.get('quadrant_info', {})
+        career_summary = f"{company_name}は{quadrant_info.get('name', '')}として分類され、{quadrant_info.get('career_advice', '')}"
+    else:
+        career_summary = f"{company_name}は情報系学生にとって技術的な成長機会を提供する可能性が高い企業です。"
+    
+    analysis['SUMMARY'] = f"{career_summary} エンジニアとしてのキャリアパス、スキル習得環境、長期的なキャリア展望についての詳細な分析は、AI機能をご利用ください。"
     
     # 企業概要（フォールバック）
     analysis['COMPANY_OVERVIEW'] = f"{company_name}の事業内容、技術的特徴、競争優位性についての詳細な分析は、AI機能をご利用ください。"
@@ -311,6 +345,53 @@ def prepare_cluster_summary(cluster_info):
     return summary
 
 
+def prepare_positioning_summary(positioning_info):
+    """二軸分析データを要約"""
+    if not positioning_info:
+        return "二軸分析データなし"
+    
+    growth_score = positioning_info.get('growth_score', 0)
+    stability_score = positioning_info.get('stability_score', 0)
+    quadrant = positioning_info.get('quadrant', 'unknown')
+    quadrant_info = positioning_info.get('quadrant_info', {})
+    detailed_metrics = positioning_info.get('detailed_metrics', {})
+    
+    summary = f"""二軸分析（成長性×安定性）による企業ポジショニング結果:
+
+■ スコア
+- 成長性スコア: {growth_score:.1f}/100点
+- 安定性スコア: {stability_score:.1f}/100点
+
+■ 企業分類
+- 象限: {quadrant_info.get('name', '不明')} ({quadrant_info.get('description', '')})
+- 推奨度: {quadrant_info.get('recommendation', '')}
+- リスクレベル: {quadrant_info.get('risk_level', '')}
+
+■ 詳細指標
+- 売上高成長率: {detailed_metrics.get('sales_growth_rate', 0)*100:.1f}%
+- 従業員数成長率: {detailed_metrics.get('employee_growth_rate', 0)*100:.1f}%
+- R&D集約度: {detailed_metrics.get('rd_intensity', 0)*100:.1f}%
+- 自己資本比率: {detailed_metrics.get('equity_ratio', 0)*100:.1f}%
+- 営業利益率安定性: {detailed_metrics.get('operating_margin_stability', 0):.2f}
+- ROA安定性: {detailed_metrics.get('roa_stability', 0):.2f}
+
+■ キャリアアドバイス
+{quadrant_info.get('career_advice', '')}
+
+■ 同象限の推薦企業"""
+    
+    # 推薦企業情報
+    recommendations = positioning_info.get('recommendations', [])
+    if recommendations:
+        summary += "\n"
+        for i, rec in enumerate(recommendations[:3], 1):
+            summary += f"{i}. {rec.get('company_name', '')} (成長性{rec.get('growth_score', 0):.1f}点、安定性{rec.get('stability_score', 0):.1f}点)\n"
+    else:
+        summary += "\n（同象限の企業データなし）"
+    
+    return summary
+
+
 def get_feature_label(feature):
     """特徴量の日本語ラベル"""
     # ml_analytics.pyのget_feature_labelと統合するため、そちらから import
@@ -318,8 +399,17 @@ def get_feature_label(feature):
     return ml_get_feature_label(feature)
 
 
-def build_comprehensive_analysis_prompt(company_name, financial_summary, prediction_summary, cluster_summary, additional_info):
-    """包括的分析用のプロンプトを構築"""
+def build_comprehensive_analysis_prompt(company_name, financial_summary, prediction_summary, cluster_summary, additional_info, positioning_summary=None):
+    """包括的分析用のプロンプトを構築（二軸分析統合版）"""
+    
+    # 二軸分析情報の有無でプロンプトを調整
+    positioning_section = ""
+    if positioning_summary and positioning_summary != "二軸分析データなし":
+        positioning_section = f"""
+## 企業ポジショニング分析（二軸分析: 成長性×安定性）
+{positioning_summary}
+"""
+    
     prompt = f"""
 あなたは情報系学生の就活支援を専門とする企業分析アナリストです。以下の企業について、情報系学生のキャリア形成の観点から構造化された分析を行ってください。
 
@@ -334,15 +424,17 @@ def build_comprehensive_analysis_prompt(company_name, financial_summary, predict
 
 ## 業界ポジショニング・クラスタリング分析（UMAPベース）
 {cluster_summary}
-
+{positioning_section}
 ## 外部情報（検索結果）
 {additional_info.get('web_search_summary', 'なし')}
 
 ## 指示
-上記データを統合して情報系学生向けの就活分析を行ってください。必ず以下の形式で出力してください。
+上記データを統合して情報系学生向けの就活分析を行ってください。**特に二軸分析による企業分類（成長性×安定性）を重視し、就活生の企業選択判断に直結する価値ある分析を提供してください。**
+
+必ず以下の形式で出力してください。
 
 [FINANCIAL_ANALYSIS]
-財務データに基づく企業の特徴と健全性の簡潔な分析（100-150文字程度）
+財務データに基づく企業の特徴と健全性の簡潔な分析。二軸分析の結果も含めて企業の財務安全性と成長性を評価（100-150文字程度）
 [/FINANCIAL_ANALYSIS]
 
 [COMPANY_OVERVIEW]
@@ -398,34 +490,42 @@ Tavily検索結果に基づく企業の簡潔な説明。事業内容、主要�
 [/PROFIT_SCENARIOS_PESSIMISTIC]
 
 [POSITIONING_ANALYSIS]
-業界内ポジショニング分析（200-250文字程度）：
+業界内ポジショニング分析（250-300文字程度）：
+・**二軸分析による企業分類の意味と就活生へのインパクト**
 ・クラスタデータに基づく同業他社比較
 ・技術力・イノベーション力の評価
 ・市場での競争優位性と差別化要因
 ・デジタル変革への取り組み状況
 ・情報系人材の活用・育成環境
 ・業界トレンドへの適応力
+・**同象限企業との比較による相対的優位性**
 [/POSITIONING_ANALYSIS]
 
 [SUMMARY]
-情報系学生向けキャリア総括（250-300文字程度）：
+情報系学生向けキャリア総括（300-350文字程度）：
+・**二軸分析結果に基づく企業選択の推奨度と理由**
 ・この企業でのキャリア形成価値
 ・技術的成長機会とスキル習得環境
 ・エンジニアとしてのキャリアパス
 ・業界での将来性と安定性
-・情報系学生に推奨する理由・注意点
+・**リスクレベルに応じた就活戦略のアドバイス**
 ・長期的なキャリア展望
+・**同象限の企業群との比較優位性**
 [/SUMMARY]
 
 各セクションは具体的で実用的な内容にし、特に情報系学生の視点から技術的成長機会、キャリア形成、業界トレンドを重視した分析を行ってください。
 
-## 分析時の重要な視点
+## 分析時の重要な視点（二軸分析統合版）
+- **成長性×安定性の組み合わせが就活生のキャリア戦略に与える影響**
+- **リスク許容度に応じた企業選択指針の提供**
 - プログラミング言語、開発環境、技術スタックの言及
 - エンジニアの成長環境（研修制度、勉強会、技術コミュニティ）
 - 将来性の高い技術分野（AI、IoT、クラウド、DX）への取り組み
 - 情報系学生が活躍できる職種・部門の具体的な説明
 - 業界内での技術力・イノベーション力の客観的評価
 - 長期的なキャリア形成の可能性（昇進、転職市場価値）
+- **同象限企業群の中での相対的ポジション評価**
+- **個人のキャリア志向（安定志向/成長志向/チャレンジ志向）との適合性**
 """
     return prompt
 

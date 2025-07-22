@@ -23,8 +23,8 @@
 
 <!-- タブナビゲーション -->
 <div class="tab-navigation">
-    <button class="tab-button active" onclick="showTab('financial-data')">財務データ</button>
-    <button class="tab-button" onclick="showTab('ai-analysis')">AI企業分析</button>
+    <button class="tab-button active" data-tab="financial-data">財務データ</button>
+    <button class="tab-button" data-tab="ai-analysis">AI企業分析</button>
 </div>
 
 <!-- 財務データタブ -->
@@ -301,45 +301,115 @@
             <!-- ポジショニング分析 -->
             <div class="analysis-section">
                 <h3>🎯 ポジショニング分析</h3>
+                
+                <!-- 二軸分析セクション -->
                 <div class="positioning-analysis-content">
-                    <p class="positioning-explanation">分析中...</p>
-                </div>
-                {% if cluster_info %}
-                    <div class="clustering-content">
-                        <div class="cluster-summary">
-                            <h4>クラスタ{{ cluster_info.cluster_id }} (全{{ cluster_info.total_clusters }}クラスタ中)</h4>
-                            <p>データ年度: {{ cluster_info.company_year }}年</p>
+                    <h4>📊 二軸分析（成長性 × 安定性）</h4>
+                    <div class="positioning-map-container">
+                        <p class="positioning-explanation">企業の成長性と安定性を分析中...</p>
+                        <div class="positioning-loading">
+                            <div class="loading-spinner"></div>
+                            <p>二軸分析を実行中です...</p>
                         </div>
-                        
-                        <div class="chart-container">
-                            <img src="data:image/png;base64,{{ cluster_info.chart }}" alt="クラスタリングマップ" class="cluster-chart">
-                        </div>
-                        
-                        <div class="similar-companies">
-                            <h4>同じクラスタの企業</h4>
-                            <ul>
-                                {% for company in cluster_info.same_cluster_companies %}
-                                    <li><a href="{% url 'financial:company_detail' company.code %}">{{ company.name }}</a> ({{ company.year }}年)</li>
-                                {% endfor %}
-                            </ul>
-                        </div>
-                        
-                        <div class="cluster-characteristics">
-                            <h4>クラスタの特徴</h4>
-                            {% for feature, data in cluster_info.cluster_characteristics.items %}
-                                <div class="characteristic-item">
-                                    <strong>{{ feature }}:</strong> 
-                                    {{ data.value|floatformat:0 }} 
-                                    (全体平均比: {{ data.relative|floatformat:1 }}%)
+                    </div>
+                    
+                    <!-- 二軸分析結果表示エリア -->
+                    <div class="positioning-results" style="display: none;">
+                        <div class="quadrant-summary">
+                            <div class="quadrant-badge">
+                                <span class="quadrant-name"></span>
+                                <span class="quadrant-description"></span>
+                            </div>
+                            <div class="scores-container">
+                                <div class="score-item">
+                                    <span class="score-label">成長性</span>
+                                    <span class="score-value growth-score"></span>
                                 </div>
-                            {% endfor %}
+                                <div class="score-item">
+                                    <span class="score-label">安定性</span>
+                                    <span class="score-value stability-score"></span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="positioning-chart-container">
+                            <img class="positioning-chart" alt="企業ポジショニングマップ">
+                        </div>
+                        
+                        <div class="career-advice">
+                            <h5>💼 キャリアアドバイス</h5>
+                            <p class="advice-text"></p>
+                        </div>
+                        
+                        <div class="recommendations-section">
+                            <h5>🔍 同じタイプの企業</h5>
+                            <ul class="recommendations-list"></ul>
+                        </div>
+                        
+                        <div class="detailed-metrics">
+                            <h5>📈 詳細指標</h5>
+                            <div class="metrics-grid">
+                                <div class="metric-item">
+                                    <span class="metric-label">売上高成長率</span>
+                                    <span class="metric-value sales-growth"></span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">従業員数成長率</span>
+                                    <span class="metric-value employee-growth"></span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">R&D集約度</span>
+                                    <span class="metric-value rd-intensity"></span>
+                                </div>
+                                <div class="metric-item">
+                                    <span class="metric-label">自己資本比率</span>
+                                    <span class="metric-value equity-ratio"></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                {% else %}
-                    <div class="no-data">
-                        <p>クラスタリング分析に必要なデータが不足しています。</p>
-                    </div>
-                {% endif %}
+                </div>
+                
+                <!-- 従来のクラスタリング分析（背景情報として表示） -->
+                <div class="clustering-analysis-content">
+                    <h4>🔗 詳細クラスタリング分析</h4>
+                    {% if cluster_info %}
+                        <div class="clustering-content">
+                            <div class="cluster-summary">
+                                <h5>クラスタ{{ cluster_info.cluster_id }} (全{{ cluster_info.total_clusters }}クラスタ中)</h5>
+                                <p>データ年度: {{ cluster_info.company_year }}年</p>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <img src="data:image/png;base64,{{ cluster_info.chart }}" alt="クラスタリングマップ" class="cluster-chart">
+                            </div>
+                            
+                            <div class="similar-companies">
+                                <h5>同じクラスタの企業</h5>
+                                <ul>
+                                    {% for company in cluster_info.same_cluster_companies %}
+                                        <li><a href="{% url 'financial:company_detail' company.code %}">{{ company.name }}</a> ({{ company.year }}年)</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            
+                            <div class="cluster-characteristics">
+                                <h5>クラスタの特徴</h5>
+                                {% for feature, data in cluster_info.cluster_characteristics.items %}
+                                    <div class="characteristic-item">
+                                        <strong>{{ feature }}:</strong> 
+                                        {{ data.value|floatformat:0 }} 
+                                        (全体平均比: {{ data.relative|floatformat:1 }}%)
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="no-data">
+                            <p>クラスタリング分析に必要なデータが不足しています。</p>
+                        </div>
+                    {% endif %}
+                </div>
             </div>
             
             <!-- 総括 -->

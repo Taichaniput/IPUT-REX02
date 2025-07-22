@@ -18,7 +18,7 @@ from .src import (
     calculate_financial_indicators,
     generate_comprehensive_ai_analysis
 )
-from .src.ml_analytics import perform_predictions, get_cluster_info
+from .src.ml_analytics import perform_predictions, get_cluster_info, get_positioning_analysis
 
 # 3シナリオ分析用のインポート
 from .src.ai_analysis import generate_scenario_analysis
@@ -345,11 +345,14 @@ def ai_analysis_ajax(request, edinet_code):
         # クラスタリング分析
         cluster_info = asyncio.run(get_cluster_info(edinet_code))
         
-        # AI分析実行
+        # 二軸分析（ポジショニング分析）
+        positioning_info = asyncio.run(get_positioning_analysis(edinet_code))
+        
+        # AI分析実行（二軸分析統合版）
         print(f"Starting AI analysis for {company_name}...")
         ai_analysis = generate_comprehensive_ai_analysis(
             company_name, edinet_code, data_with_indicators, 
-            prediction_results, cluster_info
+            prediction_results, cluster_info, positioning_info
         )
         print(f"AI analysis completed with keys: {ai_analysis.keys()}")
         
@@ -651,3 +654,29 @@ def get_scenario_analysis_ajax(request, edinet_code, chart_type):
 def scenario_analysis_ajax(request, edinet_code, chart_type):
     """3シナリオ分析のAJAXエンドポイント（推奨）"""
     return get_scenario_analysis_ajax(request, edinet_code, chart_type)
+
+
+@require_http_methods(["GET"])
+def get_positioning_analysis_ajax(request, edinet_code):
+    """二軸分析ポジショニングのAJAX取得"""
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'ログインが必要です'}, status=401)
+    
+    try:
+        print(f"Starting positioning analysis AJAX for {edinet_code}")
+        
+        # 二軸分析実行
+        positioning_info = asyncio.run(get_positioning_analysis(edinet_code))
+        
+        if not positioning_info:
+            print(f"No positioning info returned for {edinet_code}")
+            return JsonResponse({'error': '二軸分析に必要なデータが不足しています'}, status=400)
+        
+        print(f"Positioning analysis successful for {edinet_code}")
+        return JsonResponse({'positioning_analysis': positioning_info})
+        
+    except Exception as e:
+        print(f"Positioning analysis AJAX error for {edinet_code}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({'error': f'二軸分析エラー: {str(e)}'}, status=500)

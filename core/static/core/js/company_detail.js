@@ -356,8 +356,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const tabButtons = document.getElementsByClassName('tab-button');
     for (let button of tabButtons) {
         button.addEventListener('click', function() {
-            const tabName = this.textContent.includes('財務データ') ? 'financial-data' : 'ai-analysis';
-            showTab(tabName);
+            const tabName = this.getAttribute('data-tab');
+            if (tabName) {
+                showTab(tabName);
+            }
         });
     }
     
@@ -371,6 +373,10 @@ document.addEventListener('DOMContentLoaded', function() {
             // 企業概要セクションも自動でロード
             if (!window.companyOverviewLoaded && !window.companyOverviewLoading) {
                 loadCompanyOverview();
+            }
+            // 二軸分析（ポジショニング）も自動でロード
+            if (!window.positioningAnalysisLoaded && !window.positioningAnalysisLoading) {
+                loadPositioningAnalysis();
             }
         }, 500); // 500ms後に開始
     }
@@ -645,3 +651,260 @@ function showChartScenarioError(targetSection, message) {
         explanation.classList.add('error-text');
     });
 }
+
+/**
+ * 二軸分析（ポジショニング分析）をAJAXで読み込む
+ */
+async function loadPositioningAnalysis() {
+    // すでに読み込み中または完了している場合は何もしない
+    if (window.positioningAnalysisLoading || window.positioningAnalysisLoaded) {
+        return;
+    }
+    
+    window.positioningAnalysisLoading = true;
+    
+    // EDINETコードを取得
+    const pathParts = window.location.pathname.split('/');
+    const edinetCode = pathParts[pathParts.indexOf('company') + 1];
+    
+    if (!edinetCode) {
+        console.error('EDINETコードが見つかりません');
+        return;
+    }
+    
+    try {
+        console.log(`Fetching positioning analysis for edinet code: ${edinetCode}`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2分でタイムアウト
+        
+        const response = await fetch(`/api/company/${edinetCode}/positioning/`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Content-Type': 'application/json',
+            },
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        console.log(`Response status: ${response.status}, statusText: ${response.statusText}`);
+        
+        const data = await response.json();
+        console.log('Positioning analysis response:', data);
+        
+        if (response.ok && data.positioning_analysis) {
+            // 二軸分析結果を表示
+            displayPositioningAnalysis(data.positioning_analysis);
+            window.positioningAnalysisLoaded = true;
+        } else {
+            console.error('Server returned error:', data);
+            throw new Error(data.error || `サーバーエラー (${response.status}): 二軸分析の取得に失敗しました`);
+        }
+        
+    } catch (error) {
+        console.error('二軸分析エラー:', error);
+        
+        let errorMessage = error.message;
+        if (error.name === 'AbortError') {
+            errorMessage = 'リクエストがタイムアウトしました。データ処理に時間がかかっています。しばらく待ってから再試行してください。';
+        }
+        
+        showPositioningAnalysisError(errorMessage);
+    } finally {
+        window.positioningAnalysisLoading = false;
+    }
+}
+
+/**
+ * 二軸分析結果を表示
+ */
+function displayPositioningAnalysis(positioningData) {
+    console.log('Displaying positioning analysis:', positioningData);
+    
+    // ローディング表示を完全に隠す
+    const loadingContainer = document.querySelector('.positioning-loading');
+    if (loadingContainer) {
+        loadingContainer.style.display = 'none';
+        loadingContainer.style.visibility = 'hidden';
+    }
+    
+    // ローディングスピナーも個別に隠す
+    const loadingSpinner = document.querySelector('.loading-spinner');
+    if (loadingSpinner) {
+        loadingSpinner.style.display = 'none';
+        loadingSpinner.style.visibility = 'hidden';
+    }
+    
+    // 初期説明テキストを更新
+    const initialExplanationElement = document.querySelector('.positioning-explanation');
+    if (initialExplanationElement) {
+        initialExplanationElement.textContent = '二軸分析が完了しました。以下の結果をご確認ください。';
+        initialExplanationElement.classList.add('fade-in-content');
+    }
+    
+    // 結果表示エリアを表示
+    const resultsContainer = document.querySelector('.positioning-results');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'block';
+        
+        // 象限情報を更新
+        const quadrantInfo = positioningData.quadrant_info || {};
+        const quadrantName = document.querySelector('.quadrant-name');
+        const quadrantDescription = document.querySelector('.quadrant-description');
+        
+        if (quadrantName) quadrantName.textContent = quadrantInfo.name || '';
+        if (quadrantDescription) quadrantDescription.textContent = quadrantInfo.description || '';
+        
+        // 象限バッジの色を設定
+        const quadrantBadge = document.querySelector('.quadrant-badge');
+        if (quadrantBadge && quadrantInfo.color) {
+            quadrantBadge.style.backgroundColor = quadrantInfo.color;
+            quadrantBadge.style.color = '#fff';
+        }
+        
+        // スコアを更新
+        const growthScoreElement = document.querySelector('.growth-score');
+        const stabilityScoreElement = document.querySelector('.stability-score');
+        
+        if (growthScoreElement) {
+            growthScoreElement.textContent = `${positioningData.growth_score?.toFixed(1) || 0}点`;
+        }
+        if (stabilityScoreElement) {
+            stabilityScoreElement.textContent = `${positioningData.stability_score?.toFixed(1) || 0}点`;
+        }
+        
+        // ポジショニングマップを表示
+        const chartElement = document.querySelector('.positioning-chart');
+        if (chartElement && positioningData.chart) {
+            chartElement.src = `data:image/png;base64,${positioningData.chart}`;
+            chartElement.style.display = 'block';
+        }
+        
+        // キャリアアドバイスを更新
+        const adviceElement = document.querySelector('.advice-text');
+        if (adviceElement && quadrantInfo.career_advice) {
+            adviceElement.textContent = quadrantInfo.career_advice;
+        }
+        
+        // 推薦企業を表示
+        const recommendationsList = document.querySelector('.recommendations-list');
+        if (recommendationsList && positioningData.recommendations) {
+            recommendationsList.innerHTML = '';
+            positioningData.recommendations.forEach(rec => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <a href="/company/${rec.edinet_code}/">${rec.company_name}</a>
+                    <span class="company-scores">
+                        (成長性: ${rec.growth_score?.toFixed(1) || 0}点, 
+                         安定性: ${rec.stability_score?.toFixed(1) || 0}点)
+                    </span>
+                `;
+                recommendationsList.appendChild(li);
+            });
+        }
+        
+        // 詳細指標を更新
+        const detailedMetrics = positioningData.detailed_metrics || {};
+        
+        const salesGrowthElement = document.querySelector('.sales-growth');
+        if (salesGrowthElement) {
+            salesGrowthElement.textContent = `${(detailedMetrics.sales_growth_rate * 100)?.toFixed(1) || 0}%`;
+        }
+        
+        const employeeGrowthElement = document.querySelector('.employee-growth');
+        if (employeeGrowthElement) {
+            employeeGrowthElement.textContent = `${(detailedMetrics.employee_growth_rate * 100)?.toFixed(1) || 0}%`;
+        }
+        
+        const rdIntensityElement = document.querySelector('.rd-intensity');
+        if (rdIntensityElement) {
+            rdIntensityElement.textContent = `${(detailedMetrics.rd_intensity * 100)?.toFixed(1) || 0}%`;
+        }
+        
+        const equityRatioElement = document.querySelector('.equity-ratio');
+        if (equityRatioElement) {
+            equityRatioElement.textContent = `${(detailedMetrics.equity_ratio * 100)?.toFixed(1) || 0}%`;
+        }
+        
+        // フェードイン効果
+        resultsContainer.classList.add('fade-in-content');
+    }
+    
+    // ポジショニング説明を更新
+    const explanationElement = document.querySelector('.positioning-explanation');
+    if (explanationElement && positioningData.interpretation) {
+        explanationElement.innerHTML = positioningData.interpretation.replace(/\n/g, '<br>');
+        explanationElement.classList.add('fade-in-content');
+    }
+}
+
+/**
+ * 二軸分析エラーを表示
+ */
+function showPositioningAnalysisError(message) {
+    console.error('Positioning analysis error:', message);
+    
+    // ローディング表示を完全に隠す
+    const loadingContainer = document.querySelector('.positioning-loading');
+    if (loadingContainer) {
+        loadingContainer.style.display = 'none';
+        loadingContainer.style.visibility = 'hidden';
+    }
+    
+    // ローディングスピナーも個別に隠す
+    const loadingSpinner = document.querySelector('.loading-spinner');
+    if (loadingSpinner) {
+        loadingSpinner.style.display = 'none';
+        loadingSpinner.style.visibility = 'hidden';
+    }
+    
+    // エラーメッセージを表示
+    const errorExplanationElement = document.querySelector('.positioning-explanation');
+    if (errorExplanationElement) {
+        errorExplanationElement.innerHTML = `
+            <div class="error-content">
+                <p>🚫 二軸分析でエラーが発生しました: ${message}</p>
+                <button onclick="retryPositioningAnalysis()" class="btn btn-small">再試行</button>
+            </div>
+        `;
+        errorExplanationElement.classList.add('error-text');
+    }
+}
+
+/**
+ * 二軸分析を再試行
+ */
+function retryPositioningAnalysis() {
+    window.positioningAnalysisLoaded = false;
+    window.positioningAnalysisLoading = false;
+    
+    // エラー表示をクリア
+    const retryExplanationElement = document.querySelector('.positioning-explanation');
+    if (retryExplanationElement) {
+        retryExplanationElement.textContent = '企業の成長性と安定性を分析中...';
+        retryExplanationElement.classList.remove('error-text');
+    }
+    
+    // ローディング表示を再表示
+    const loadingContainer = document.querySelector('.positioning-loading');
+    if (loadingContainer) {
+        loadingContainer.style.display = 'block';
+    }
+    
+    // 結果表示エリアを隠す
+    const resultsContainer = document.querySelector('.positioning-results');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'none';
+    }
+    
+    // 再実行
+    loadPositioningAnalysis();
+}
+
+// グローバルスコープに関数を公開（後方互換性のため）
+window.showTab = showTab;
+window.retryAIAnalysis = retryAIAnalysis;
+window.retryCompanyOverview = retryCompanyOverview;
+window.retryPositioningAnalysis = retryPositioningAnalysis;
