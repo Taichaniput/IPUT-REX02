@@ -1,3 +1,4 @@
+(function() {
 // Home Page JavaScript
 
 /**
@@ -358,3 +359,4 @@ window.addEventListener('beforeunload', function() {
 window.addEventListener('load', function() {
     hidePageLoadingOverlay();
 });
+})();

@@ -1,3 +1,4 @@
+(function() {
 // Base Template JavaScript
 
 /**
@@ -271,3 +272,4 @@ const loadingCSS = `
 const style = document.createElement('style');
 style.textContent = loadingCSS;
 document.head.appendChild(style);
+})();

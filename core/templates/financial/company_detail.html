@@ -214,7 +214,7 @@
                                 <div class="prediction-item">
                                     <h4>{{ prediction_results.net_sales.label }}の予測</h4>
                                     <div class="chart-container">
-                                        <img src="data:image/png;base64,{{ prediction_results.net_sales.chart }}" alt="{{ prediction_results.net_sales.label }}予測グラフ" class="prediction-chart">
+                                        <canvas id="sales-chart" class="prediction-chart" data-chart-metric="net_sales"></canvas>
                                     </div>
                                     <div class="prediction-details">
                                         {% for pred_type, pred_data in prediction_results.net_sales.predictions.items %}
@@ -254,7 +254,7 @@
                                 <div class="prediction-item">
                                     <h4>{{ prediction_results.net_income.label }}の予測</h4>
                                     <div class="chart-container">
-                                        <img src="data:image/png;base64,{{ prediction_results.net_income.chart }}" alt="{{ prediction_results.net_income.label }}予測グラフ" class="prediction-chart">
+                                        <canvas id="profit-chart" class="prediction-chart" data-chart-metric="net_income"></canvas>
                                     </div>
                                     <div class="prediction-details">
                                         {% for pred_type, pred_data in prediction_results.net_income.predictions.items %}
@@ -333,7 +333,7 @@
                         </div>
                         
                         <div class="positioning-chart-container">
-                            <img class="positioning-chart" alt="企業ポジショニングマップ">
+                            <canvas id="positioning-chart" class="positioning-chart"></canvas>
                         </div>
                         
                         <div class="career-advice">
@@ -381,7 +381,7 @@
                             </div>
                             
                             <div class="chart-container">
-                                <img src="data:image/png;base64,{{ cluster_info.chart }}" alt="クラスタリングマップ" class="cluster-chart">
+                                <canvas id="clustering-chart" class="cluster-chart"></canvas>
                             </div>
                             
                             <div class="similar-companies">

@@ -1,5 +1,34 @@
 /* Company Detail Page Styles */
 
+/* Chart Error Display */
+.chart-error-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    max-width: 300px;
+}
+
+.chart-error-icon {
+    font-size: 24px;
+    color: #856404;
+    margin-bottom: 10px;
+}
+
+.chart-error-message {
+    color: #856404;
+    font-size: 14px;
+    line-height: 1.4;
+    margin: 0;
+}
+
 /* タブスタイル */
 .tab-navigation {
     display: flex;
@@ -541,7 +570,7 @@
 /* 通知 */
 .notification {
     position: fixed;
-    top: 20px;
+    top: 80px;
     right: 20px;
     padding: 15px 20px;
     border-radius: 8px;
