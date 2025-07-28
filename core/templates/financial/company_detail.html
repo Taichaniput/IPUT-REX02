@@ -136,6 +136,13 @@
     </div>
     {% endif %}
     
+
+    <!-- 従業員推移 -->
+    <div class="employee-chart-section">
+                    <h4>従業員数推移</h4>
+                    <canvas id="employeeChart"></canvas>
+    </div>
+
     <!-- 財務分析セクション -->
     {% if financial_data|length > 1 %}
     <div class="financial-analysis-section">
@@ -345,6 +352,7 @@
 {% endif %}
 
 {% block extra_js %}
+<div id="employee-data" style="display:none;">{{ employee_data }}</div>
 <script src="{% static 'core/js/company_detail.js' %}?v={{ timestamp|default:'1.0' }}"></script>
 {% endblock %}
 {% endblock %}

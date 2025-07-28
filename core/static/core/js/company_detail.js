@@ -870,6 +870,94 @@ async function renderChart(canvasId, chartData) {
 // Duplicate showChartError function removed - using primary version below
 
 /**
+ * 従業員数推移チャートを描画
+ */
+function renderEmployeeChart(employeeDataJson) {
+    console.log('DEBUG: Rendering employee chart...');
+    const employeeData = JSON.parse(employeeDataJson);
+    const canvas = document.getElementById('employeeChart');
+
+    if (!canvas) {
+        console.error('Canvas element with ID "employeeChart" not found.');
+        return;
+    }
+
+    const ctx = canvas.getContext('2d');
+
+    // 既存のChart.jsインスタンスがあれば破棄
+    if (window.employeeChartInstance) {
+        window.employeeChartInstance.destroy();
+    }
+
+    const years = employeeData.map(item => item.year);
+    const employees = employeeData.map(item => item.employees);
+
+    window.employeeChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: years,
+            datasets: [{
+                label: '従業員数',
+                data: employees,
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: '従業員数推移',
+                    font: {
+                        size: 18,
+                        weight: 'bold'
+                    },
+                    padding: 20
+                },
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: '年度',
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: '従業員数',
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString(); // 数値をカンマ区切りで表示
+                        }
+                    }
+                }
+            }
+        }
+    });
+    console.log('DEBUG: Employee chart rendered successfully.');
+}
+
+/**
  * クラスタリングチャートを描画
  */
 function renderClusteringChart(canvasId, chartData) {
@@ -1648,6 +1736,15 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // デフォルトで財務データタブを表示
     showTab('financial-data');
+
+    // 従業員数チャートの描画
+    const employeeDataElement = document.getElementById('employee-data');
+    if (employeeDataElement) {
+        const employeeDataJson = employeeDataElement.textContent;
+        if (employeeDataJson) {
+            renderEmployeeChart(employeeDataJson);
+        }
+    }
     
     // タブボタンのクリックイベントを設定
     const tabButtons = document.getElementsByClassName('tab-button');

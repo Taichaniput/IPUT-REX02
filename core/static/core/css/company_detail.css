@@ -97,6 +97,31 @@
 .positive { color: #28a745; }
 .negative { color: #dc3545; }
 
+/* 従業員数チャートセクション */
+.employee-chart-section {
+    margin-top: 30px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    min-height: 300px; /* 適切な最小高さを設定 */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.employee-chart-section h4 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+#employeeChart {
+    width: 100% !important;
+    height: 300px !important; /* チャートの具体的な高さを設定 */
+    max-height: 400px; /* 最大高さを設定して、大きくなりすぎないようにする */
+}
+
 /* 予測セクション */
 .prediction-note {
     background-color: #fff3cd;

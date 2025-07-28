@@ -83,6 +83,16 @@ def company_detail(request, edinet_code):
     ai_analysis = {}
     positioning_info = None
     
+    employee_data = []
+    for fd in financial_data:
+        if fd.fiscal_year and fd.number_of_employees is not None:
+            employee_data.append({
+                'year': fd.fiscal_year,
+                'employees': fd.number_of_employees
+            })
+    # Sort employee_data by year in ascending order for the chart
+    employee_data.sort(key=lambda x: x['year'])
+
     import time
     return render(request, 'financial/company_detail.html', {
         'company_name': company_name,
@@ -94,6 +104,7 @@ def company_detail(request, edinet_code):
         'positioning_info': positioning_info,
         'show_login_prompt': not request.user.is_authenticated,
         'timestamp': int(time.time()),  # キャッシュバスティング用
+        'employee_data': json.dumps(employee_data), # Chart.js用にJSON形式で渡す
     })
 
 
