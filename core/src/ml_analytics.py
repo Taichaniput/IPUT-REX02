@@ -950,11 +950,7 @@ class PositioningService:
                         'borderWidth': 1,
                         'pointRadius': 5,
                         'pointHoverRadius': 7,
-                        'pointStyle': 'circle',
-                        'parsing': {
-                            'xAxisKey': 'x',
-                            'yAxisKey': 'y'
-                        }
+                        'pointStyle': 'circle'
                     })
 
         # 対象企業データセット
@@ -971,11 +967,7 @@ class PositioningService:
             'borderWidth': 2,
             'pointRadius': 10,
             'pointHoverRadius': 12,
-            'pointStyle': 'star',
-            'parsing': {
-                'xAxisKey': 'x',
-                'yAxisKey': 'y'
-            }
+            'pointStyle': 'star'
         })
 
         # 業界平均データセット
@@ -993,16 +985,11 @@ class PositioningService:
                 'borderWidth': 2,
                 'pointRadius': 8,
                 'pointHoverRadius': 10,
-                'pointStyle': 'triangle',
-                'parsing': {
-                    'xAxisKey': 'x',
-                    'yAxisKey': 'y'
-                }
+                'pointStyle': 'triangle'
             })
 
         return {
-            'labels': ['成長性スコア', '安定性スコア'], # Chart.jsでは散布図の場合、labelsは軸のタイトルとして使われる
-            'datasets': datasets,
+            'datasets': datasets,  # Chart.js散布図にはlabelsプロパティは不要
             'title': '企業ポジショニングマップ（成長性 × 安定性）',
             'x_axis_label': '成長性スコア',
             'y_axis_label': '安定性スコア',
