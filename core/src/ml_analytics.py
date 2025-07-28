@@ -33,65 +33,99 @@ class PredictionService:
         plt.rcParams['axes.unicode_minus'] = False
 
     def analyze_financial_predictions(self, financial_data):
+        print(f"=== PREDICTION SERVICE DEBUG START ===")
         results = {}
         
+        print(f"DEBUG: Prediction input data type: {type(financial_data)}, length: {len(financial_data) if financial_data else 0}")
+        
         df_data = []
-        for item in financial_data:
+        for i, item in enumerate(financial_data):
             fd = item['data'] if isinstance(item, dict) and 'data' in item else item
             if fd.fiscal_year:
-                df_data.append({
+                row_data = {
                     'fiscal_year': fd.fiscal_year,
                     'net_sales': fd.net_sales,
                     'operating_income': fd.operating_income,
                     'net_income': fd.net_income,
                     'total_assets': fd.total_assets
-                })
+                }
+                df_data.append(row_data)
+                if i < 3:  # 最初の3件のみログ出力
+                    print(f"DEBUG: Row [{i}] - Year: {fd.fiscal_year}, Sales: {fd.net_sales}, Income: {fd.net_income}")
         
+        print(f"DEBUG: DataFrame preparation - Input rows: {len(df_data)}")
         df = pd.DataFrame(df_data)
         
         if df.empty:
+            print("WARNING: DataFrame is empty, returning empty results")
             return results
         
         df = df.sort_values('fiscal_year')
+        print(f"DEBUG: DataFrame after sorting - Shape: {df.shape}, Years: {df['fiscal_year'].min()}-{df['fiscal_year'].max()}")
         
         metrics = ['net_sales', 'net_income']
         
         for metric in metrics:
-            if metric not in df.columns or df[metric].isna().all():
+            print(f"DEBUG: Processing metric: {metric}")
+            
+            if metric not in df.columns:
+                print(f"WARNING: Metric {metric} not in DataFrame columns")
+                continue
+                
+            if df[metric].isna().all():
+                print(f"WARNING: All values for metric {metric} are NaN")
                 continue
                 
             valid_data = df.dropna(subset=[metric])
-            if len(valid_data) < 3:
+            print(f"DEBUG: Valid data for {metric} - Rows: {len(valid_data)}, Required: 3")
+            
+            if len(valid_data) < 2:
+                print(f"WARNING: Insufficient data for {metric} - Need 2, have {len(valid_data)}")
                 continue
             
             years = valid_data['fiscal_year'].values
             values = valid_data[metric].values / 100000000
             
+            print(f"DEBUG: Processing {metric} - Years: {years}, Values: {values[:3]}... (showing first 3)")
+            
             scenarios = self._predict_arima(years, values)
             
-            chart_data = self._generate_chart_data_for_js(
-                years, values, scenarios,
-                f"{get_label(metric)}の3シナリオ予測",
-                get_label(metric) + "（億円）"
-            )
-            
-            results[metric] = {
-                'predictions': {
-                    'scenarios': scenarios
-                },
-                'chart_data': chart_data,
-                'label': get_label(metric)
-            }
+            if scenarios:
+                print(f"DEBUG: ARIMA prediction successful for {metric}")
+                chart_data = self._generate_chart_data_for_js(
+                    years, values, scenarios,
+                    f"{get_label(metric)}の3シナリオ予測",
+                    get_label(metric) + "（億円）"
+                )
+                
+                results[metric] = {
+                    'predictions': {
+                        'scenarios': scenarios
+                    },
+                    'chart_data': chart_data,
+                    'label': get_label(metric)
+                }
+                print(f"DEBUG: Added {metric} to results with chart data")
+            else:
+                print(f"WARNING: ARIMA prediction failed for {metric}")
         
+        print(f"DEBUG: Prediction service completed - Results keys: {list(results.keys())}")
+        print(f"=== PREDICTION SERVICE DEBUG END ===")
         return results
 
     def _predict_arima(self, years, values):
         try:
-            if len(values) < 5:
+            print(f"DEBUG: ARIMA input - Values length: {len(values)}, Values: {values}")
+            
+            if len(values) < 2:
+                print(f"WARNING: ARIMA requires at least 2 values, got {len(values)}")
                 return None
             
             clean_values = [v for v in values if v is not None and v > 0]
-            if len(clean_values) < 5:
+            print(f"DEBUG: Clean values - Length: {len(clean_values)}, Values: {clean_values}")
+            
+            if len(clean_values) < 2:
+                print(f"WARNING: ARIMA requires at least 2 clean values, got {len(clean_values)}")
                 return None
             
             model_key = self._generate_model_key(clean_values)
@@ -99,10 +133,19 @@ class PredictionService:
             
             if cached_model:
                 results = cached_model
+                print(f"DEBUG: Using cached ARIMA model")
             else:
-                model = ARIMA(clean_values, order=(1, 1, 1))
+                # データが少ない場合はより単純なモデルを使用
+                if len(clean_values) < 4:
+                    print(f"DEBUG: Using simple ARIMA(1,0,0) for short series")
+                    model = ARIMA(clean_values, order=(1, 0, 0))
+                else:
+                    print(f"DEBUG: Using standard ARIMA(1,1,1)")
+                    model = ARIMA(clean_values, order=(1, 1, 1))
+                
                 results = model.fit()
                 self._save_model(model_key, results)
+                print(f"DEBUG: ARIMA model fitted successfully")
             
             forecast = results.get_forecast(steps=3)
             pred_mean = forecast.predicted_mean
@@ -171,32 +214,59 @@ class PredictionService:
 
     def _generate_chart_data_for_js(self, actual_years, actual_values, scenarios, title, ylabel):
         all_years = list(actual_years)
+        
+        # 実績データを準備（全年度に対応するように）
+        actual_data = []
+        for i, year in enumerate(actual_years):
+            actual_data.append({
+                'x': year,
+                'y': actual_values[i]
+            })
 
         datasets = [
             {
                 'label': '実績',
-                'data': actual_values.tolist(),
-                'borderColor': 'blue',
-                'backgroundColor': 'blue',
+                'data': actual_data,
+                'borderColor': '#2E86AB',
+                'backgroundColor': '#2E86AB',
                 'fill': False,
-                'tension': 0.1
+                'tension': 0.1,
+                'pointRadius': 4,
+                'pointHoverRadius': 6
             }
         ]
         
         if scenarios: # scenariosがNoneでない場合のみ処理
-            colors = {'optimistic': '#28a745', 'current': '#17a2b8', 'pessimistic': '#ffc107'}
+            colors = {'optimistic': '#28a745', 'current': '#17a2b8', 'pessimistic': '#F18701'}
             scenario_names = {'optimistic': '楽観', 'current': '現状', 'pessimistic': '悲観'}
+            
+            last_actual_year = actual_years[-1]
+            last_actual_value = actual_values[-1]
             
             for scenario_name, scenario_data in scenarios.items():
                 if scenario_data:
+                    # 予測データを実績の最後の点から開始させる
+                    prediction_data = [
+                        {'x': last_actual_year, 'y': last_actual_value}  # 接続点
+                    ]
+                    
+                    # 予測値を追加
+                    for i, year in enumerate(scenario_data['years']):
+                        prediction_data.append({
+                            'x': year,
+                            'y': scenario_data['values'][i]
+                        })
+                    
                     datasets.append({
                         'label': f"{scenario_names[scenario_name]}（年率{scenario_data['growth_rate']:.1f}%）",
-                        'data': scenario_data['values'],
+                        'data': prediction_data,
                         'borderColor': colors[scenario_name],
                         'backgroundColor': colors[scenario_name],
                         'fill': False,
                         'borderDash': [5, 5],
-                        'tension': 0.1
+                        'tension': 0.1,
+                        'pointRadius': 3,
+                        'pointHoverRadius': 5
                     })
                     # シナリオの年度をall_yearsに追加
                     all_years.extend(scenario_data['years'])
@@ -208,7 +278,8 @@ class PredictionService:
             'labels': all_years,
             'datasets': datasets,
             'title': title,
-            'ylabel': ylabel
+            'ylabel': ylabel,
+            'type': 'line'
         }
 
 
@@ -229,6 +300,8 @@ class ClusteringService:
 
     def _get_cluster_sync(self, edinet_code):
         try:
+            print(f"=== CLUSTERING SERVICE DEBUG START for {edinet_code} ===")
+            
             latest_year_subquery = FinancialData.objects.filter(
                 edinet_code=OuterRef('edinet_code')
             ).values('edinet_code').annotate(
@@ -239,6 +312,8 @@ class ClusteringService:
                 fiscal_year=Subquery(latest_year_subquery)
             )
             
+            print(f"DEBUG: Latest data query count: {latest_data.count()}")
+            
             FEATURES = [
                 'net_assets', 'total_assets', 'net_income', 'r_and_d_expenses', 'number_of_employees'
             ]
@@ -248,27 +323,59 @@ class ClusteringService:
             )
             df.set_index('edinet_code', inplace=True)
             
+            print(f"DEBUG: Initial dataframe shape: {df.shape}")
+            print(f"DEBUG: Target company {edinet_code} in dataframe: {edinet_code in df.index}")
+            
+            if edinet_code in df.index:
+                target_row = df.loc[edinet_code]
+                print(f"DEBUG: Target company data - Year: {target_row['fiscal_year']}, Assets: {target_row['total_assets']}")
+            
             df_filled = df.dropna(subset=FEATURES, how='all')
+            print(f"DEBUG: After dropna shape: {df_filled.shape}")
             
             for feature in FEATURES:
                 if feature in df_filled.columns:
+                    original_nulls = df_filled[feature].isna().sum()
                     df_filled[feature] = df_filled[feature].fillna(df_filled[feature].median())
+                    if original_nulls > 0:
+                        print(f"DEBUG: Filled {original_nulls} null values for {feature}")
             
             numeric_columns = df_filled.select_dtypes(include=[np.number]).columns
             df_filled[numeric_columns] = df_filled[numeric_columns].replace([np.inf, -np.inf], np.nan)
             df_filled[numeric_columns] = df_filled[numeric_columns].fillna(df_filled[numeric_columns].median())
             
-            if len(df_filled) < 3 or edinet_code not in df_filled.index:
+            print(f"DEBUG: Final dataframe shape: {df_filled.shape}")
+            print(f"DEBUG: Target company in final data: {edinet_code in df_filled.index}")
+            
+            if len(df_filled) < 3:
+                print(f"WARNING: Insufficient companies for clustering - Need 3, have {len(df_filled)}")
+                return None
+                
+            if edinet_code not in df_filled.index:
+                print(f"WARNING: Target company {edinet_code} not found in final dataset")
                 return None
             
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(df_filled[FEATURES])
+            print(f"DEBUG: Feature scaling completed - Shape: {X_scaled.shape}")
             
-            umap_reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=15, min_dist=0.1)
+            # データ数に応じてUMAPパラメータを調整
+            n_companies = len(df_filled)
+            n_neighbors = min(15, max(2, n_companies // 10))
+            print(f"DEBUG: UMAP parameters - n_neighbors: {n_neighbors}")
+            
+            umap_reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=n_neighbors, min_dist=0.1)
             X_umap = umap_reducer.fit_transform(X_scaled)
+            print(f"DEBUG: UMAP transformation completed - Shape: {X_umap.shape}")
             
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=30, min_samples=8, metric='euclidean')
+            # データ数に応じてHDBSCANパラメータを調整
+            min_cluster_size = min(30, max(3, n_companies // 20))
+            min_samples = min(8, max(1, min_cluster_size // 4))
+            print(f"DEBUG: HDBSCAN parameters - min_cluster_size: {min_cluster_size}, min_samples: {min_samples}")
+            
+            clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples, metric='euclidean')
             labels = clusterer.fit_predict(X_umap)
+            print(f"DEBUG: HDBSCAN clustering completed - Unique labels: {np.unique(labels)}")
             
             from sklearn.neighbors import NearestNeighbors
             noise_mask = labels == -1
@@ -318,7 +425,7 @@ class ClusteringService:
             unique_clusters = set(labels)
             total_clusters = len(unique_clusters) - (1 if -1 in unique_clusters else 0)
             
-            return {
+            result = {
                 'cluster_id': int(company_cluster),
                 'total_clusters': total_clusters,
                 'same_cluster_companies': same_cluster_companies,
@@ -333,8 +440,16 @@ class ClusteringService:
                 'umap_interpretation': umap_interpretation
             }
             
+            print(f"DEBUG: Clustering result - Cluster ID: {company_cluster}, Total clusters: {total_clusters}")
+            print(f"DEBUG: Same cluster companies: {len(same_cluster_companies)}")
+            print(f"=== CLUSTERING SERVICE DEBUG END for {edinet_code} ===")
+            
+            return result
+            
         except Exception as e:
-            print(f"Cluster analysis error: {e}")
+            print(f"ERROR: Cluster analysis failed for {edinet_code}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def _interpret_umap(self, features):
@@ -380,37 +495,42 @@ class ClusteringService:
             cluster_data = umap_df[umap_df['cluster'] == cluster_id]
             
             if not cluster_data.empty:
+                # Convert to proper x,y format for Chart.js
+                data_points = []
+                for idx, row in cluster_data.iterrows():
+                    data_points.append({
+                        'x': row['UMAP1'],
+                        'y': row['UMAP2'],
+                        'name': row.get('filer_name', idx)
+                    })
+                
                 datasets.append({
-                    'label': f'クラスタ{cluster_id}',
-                    'data': cluster_data[['UMAP1', 'UMAP2']].values.tolist(),
-                    'backgroundColor': colors[i % len(colors)] + '80', # 50% opacity
-                    'borderColor': colors[i % len(colors)],
-                    'borderWidth': 1,
+                    'label': f'クラスタ{cluster_id} ({len(data_points)}社)',
+                    'data': data_points,
+                    'backgroundColor': 'white',  # 塗りつぶしを白に変更
+                    'borderColor': colors[i % len(colors)],  # 境界線は元の色に戻す
+                    'borderWidth': 2,
                     'pointRadius': 5,
                     'pointHoverRadius': 7,
-                    'pointStyle': 'circle',
-                    'parsing': {
-                        'xAxisKey': '0',
-                        'yAxisKey': '1'
-                    }
+                    'pointStyle': 'circle'
                 })
 
         # 対象企業をハイライト
         if target_code in umap_df.index:
             target_data = umap_df.loc[target_code]
             datasets.append({
-                'label': '当該企業',
-                'data': [{'x': target_data['UMAP1'], 'y': target_data['UMAP2']}],
-                'backgroundColor': 'red',
-                'borderColor': 'black',
-                'borderWidth': 2,
-                'pointRadius': 10,
-                'pointHoverRadius': 12,
-                'pointStyle': 'star',
-                'parsing': {
-                    'xAxisKey': 'x',
-                    'yAxisKey': 'y'
-                }
+                'label': f'当該企業 ({target_data.get("filer_name", target_code)})',
+                'data': [{
+                    'x': target_data['UMAP1'], 
+                    'y': target_data['UMAP2'],
+                    'name': target_data.get('filer_name', target_code)
+                }],
+                'backgroundColor': 'white',  # 塗りつぶしを白に変更
+                'borderColor': 'red',  # 境界線は赤に戻す
+                'borderWidth': 3,
+                'pointRadius': 12,
+                'pointHoverRadius': 15,
+                'pointStyle': 'star'
             })
         
         num_clusters = len([c for c in unique_clusters if c != -1])
@@ -427,7 +547,8 @@ class ClusteringService:
             'title': '企業の財務特性に基づくクラスタリング分析',
             'x_axis_label': 'UMAP 次元1',
             'y_axis_label': 'UMAP 次元2',
-            'description': description_text
+            'description': description_text,
+            'type': 'scatter'
         }
 
 
@@ -491,19 +612,21 @@ class PositioningService:
 
     def _calculate_growth_stability_scores(self, edinet_code):
         try:
+            print(f"=== POSITIONING SERVICE DEBUG START for {edinet_code} ===")
+            
             financial_data = FinancialData.objects.filter(
                 edinet_code=edinet_code
             ).order_by('-fiscal_year')[:5]
 
-            print(f"DEBUG: _calculate_growth_stability_scores for {edinet_code} - financial_data count: {len(financial_data)}")
+            print(f"DEBUG: Financial data query result - Count: {len(financial_data)}")
 
-            if len(financial_data) < 3:
-                print(f"DEBUG: _calculate_growth_stability_scores for {edinet_code} - Insufficient financial data (less than 3 years).")
+            if len(financial_data) < 2:  # 要件を3年から2年に緩和
+                print(f"WARNING: Insufficient financial data for positioning analysis - Need 2, have {len(financial_data)}")
                 return None
 
             df_data = []
-            for fd in financial_data:
-                df_data.append({
+            for i, fd in enumerate(financial_data):
+                row_data = {
                     'fiscal_year': fd.fiscal_year,
                     'net_sales': fd.net_sales or 0,
                     'operating_income': fd.operating_income or 0,
@@ -512,17 +635,30 @@ class PositioningService:
                     'net_assets': fd.net_assets or 0,
                     'r_and_d_expenses': fd.r_and_d_expenses or 0,
                     'number_of_employees': fd.number_of_employees or 0
-                })
+                }
+                df_data.append(row_data)
+                if i < 3:  # 最初の3件のみログ出力
+                    print(f"DEBUG: Positioning data [{i}] - Year: {fd.fiscal_year}, Sales: {fd.net_sales}, Assets: {fd.total_assets}")
 
             df = pd.DataFrame(df_data).sort_values('fiscal_year')
-            print(f"DEBUG: DataFrame head:\n{df.head()}")
+            print(f"DEBUG: Positioning DataFrame - Shape: {df.shape}, Years: {df['fiscal_year'].min()}-{df['fiscal_year'].max()}")
 
             growth_score = self._calculate_growth_score(df)
             stability_score = self._calculate_stability_score(df)
 
-            print(f"DEBUG: Growth Score: {growth_score}, Stability Score: {stability_score}")
+            print(f"DEBUG: Calculated scores - Growth: {growth_score:.1f}, Stability: {stability_score:.1f}")
 
-            return {
+            quadrant = self._determine_quadrant(growth_score, stability_score)
+            detailed_metrics = {
+                'sales_growth_rate': self._calculate_sales_growth_rate(df),
+                'employee_growth_rate': self._calculate_employee_growth_rate(df),
+                'rd_intensity': self._calculate_rd_intensity(df),
+                'equity_ratio': self._calculate_equity_ratio(df),
+                'operating_margin_stability': self._calculate_operating_margin_stability(df),
+                'roa_stability': self._calculate_roa_stability(df)
+            }
+            
+            result = {
                 'growth_score': growth_score,
                 'stability_score': stability_score,
                 'company_info': {
@@ -532,16 +668,15 @@ class PositioningService:
                     'net_sales_billion': (financial_data[0].net_sales or 0) / 100000000,
                     'employees': financial_data[0].number_of_employees or 0
                 },
-                'quadrant': self._determine_quadrant(growth_score, stability_score),
-                'detailed_metrics': {
-                    'sales_growth_rate': self._calculate_sales_growth_rate(df),
-                    'employee_growth_rate': self._calculate_employee_growth_rate(df),
-                    'rd_intensity': self._calculate_rd_intensity(df),
-                    'equity_ratio': self._calculate_equity_ratio(df),
-                    'operating_margin_stability': self._calculate_operating_margin_stability(df),
-                    'roa_stability': self._calculate_roa_stability(df)
-                }
+                'quadrant': quadrant,
+                'detailed_metrics': detailed_metrics
             }
+            
+            print(f"DEBUG: Positioning result - Quadrant: {quadrant}")
+            print(f"DEBUG: Detailed metrics - Sales growth: {detailed_metrics['sales_growth_rate']:.3f}, Equity ratio: {detailed_metrics['equity_ratio']:.3f}")
+            print(f"=== POSITIONING SERVICE DEBUG END for {edinet_code} ===")
+            
+            return result
 
         except Exception as e:
             print(f"ERROR: Growth stability calculation error for {edinet_code}: {e}")
@@ -871,6 +1006,7 @@ class PositioningService:
             'title': '企業ポジショニングマップ（成長性 × 安定性）',
             'x_axis_label': '成長性スコア',
             'y_axis_label': '安定性スコア',
+            'type': 'scatter',
             'quadrant_lines': [
                 {'axis': 'x', 'value': 50, 'color': 'gray', 'dash': [5, 5]},
                 {'axis': 'y', 'value': 50, 'color': 'gray', 'dash': [5, 5]}

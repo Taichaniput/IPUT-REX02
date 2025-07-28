@@ -35,9 +35,20 @@ function showTab(tabName) {
     
     // AI分析タブが選択された場合の処理
     if (tabName === 'ai-analysis') {
+        console.log('DEBUG: AI analysis tab selected');
+        console.log('DEBUG: aiAnalysisLoaded:', window.aiAnalysisLoaded);
+        console.log('DEBUG: aiAnalysisLoading:', window.aiAnalysisLoading);
+        
         // 分析結果がまだ読み込まれていない場合のみAJAXで取得
         if (!window.aiAnalysisLoaded && !window.aiAnalysisLoading) {
+            console.log('DEBUG: Starting AI analysis load...');
             loadAIAnalysis();
+        } else if (window.aiAnalysisLoaded) {
+            console.log('DEBUG: AI analysis already loaded, checking charts...');
+            // 既に読み込み済みだが、チャートが表示されていない可能性がある場合の再描画
+            setTimeout(async () => {
+                await renderChartsWithSynchronization();
+            }, 100);
         }
         // チャートシナリオ分析もここでロード
         loadChartScenarioAnalysis();
@@ -76,15 +87,56 @@ async function loadAIAnalysis() {
         
         console.log('Response status:', response.status);
         const data = await response.json();
-        console.log('Response data (full AI analysis):', data); // Full AI analysis object
+        console.log('=== FRONTEND AI ANALYSIS DEBUG START ===');
+        console.log('Response data (full AI analysis):', data);
+        
+        if (data.warnings) {
+            console.warn('Server warnings:', data.warnings);
+        }
         
         if (response.ok && data.success) {
+            // データの詳細検証
+            console.log('Data structure validation:');
+            console.log('- Has ai_analysis:', !!data.ai_analysis);
+            console.log('- Has prediction_results:', !!data.ai_analysis?.prediction_results);
+            console.log('- Has cluster_info:', !!data.ai_analysis?.cluster_info);
+            console.log('- Has positioning_info:', !!data.ai_analysis?.positioning_info);
+            
+            if (data.ai_analysis?.prediction_results) {
+                console.log('Prediction results keys:', Object.keys(data.ai_analysis.prediction_results));
+                for (const [key, result] of Object.entries(data.ai_analysis.prediction_results)) {
+                    console.log(`- ${key}: has chart_data=${!!result.chart_data}, has predictions=${!!result.predictions}`);
+                }
+            }
+            
+            if (data.ai_analysis?.cluster_info) {
+                console.log('Cluster info keys:', Object.keys(data.ai_analysis.cluster_info));
+                console.log('- cluster_id:', data.ai_analysis.cluster_info.cluster_id);
+                console.log('- has chart_data:', !!data.ai_analysis.cluster_info.chart_data);
+            }
+            
+            if (data.ai_analysis?.positioning_info) {
+                console.log('Positioning info keys:', Object.keys(data.ai_analysis.positioning_info));
+                console.log('- growth_score:', data.ai_analysis.positioning_info.growth_score);
+                console.log('- stability_score:', data.ai_analysis.positioning_info.stability_score);
+                console.log('- has chart:', !!data.ai_analysis.positioning_info.chart);
+            }
+            
+            // グローバル変数に格納
             window.predictionResults = data.ai_analysis.prediction_results; 
             window.clusterInfo = data.ai_analysis.cluster_info;
             window.positioningInfo = data.ai_analysis.positioning_info;
+            
+            console.log('Global variables set:');
+            console.log('- window.predictionResults:', !!window.predictionResults);
+            console.log('- window.clusterInfo:', !!window.clusterInfo);
+            console.log('- window.positioningInfo:', !!window.positioningInfo);
+            
             displayAIAnalysis(data.ai_analysis);
             window.aiAnalysisLoaded = true;
+            console.log('=== FRONTEND AI ANALYSIS DEBUG END ===');
         } else {
+            console.error('Analysis failed:', data.error);
             throw new Error(data.error || '分析に失敗しました');
         }
         
@@ -212,8 +264,13 @@ async function renderChartsWithSynchronization() {
                 if (salesCanvas) {
                     await renderChart('sales-chart', window.predictionResults.net_sales.chart_data);
                 } else {
-                    console.warn('WARNING: Sales chart canvas not found');
+                    console.log('DEBUG: Sales chart canvas not found, creating dynamic chart');
+                    // canvas要素が存在しない場合は動的に作成
+                    createAndRenderChart('sales', window.predictionResults.net_sales);
                 }
+            } else {
+                console.warn('WARNING: Sales chart data not available');
+                showNoDataMessage('sales', '売上高予測データが不足しています');
             }
             
             // 純利益予測チャート
@@ -223,59 +280,95 @@ async function renderChartsWithSynchronization() {
                 if (profitCanvas) {
                     await renderChart('profit-chart', window.predictionResults.net_income.chart_data);
                 } else {
-                    console.warn('WARNING: Profit chart canvas not found');
+                    console.log('DEBUG: Profit chart canvas not found, creating dynamic chart');
+                    // canvas要素が存在しない場合は動的に作成
+                    createAndRenderChart('profit', window.predictionResults.net_income);
                 }
+            } else {
+                console.warn('WARNING: Profit chart data not available');
+                showNoDataMessage('profit', '純利益予測データが不足しています');
             }
         } else {
             console.warn('WARNING: No prediction results available for chart rendering');
+            // 予測結果がない場合の代替表示
+            showNoDataMessage('sales', '予測分析データが利用できません（データ不足）');
+            showNoDataMessage('profit', '予測分析データが利用できません（データ不足）');
         }
     } catch (error) {
         console.error('ERROR: Failed to render prediction charts:', error);
+        showNoDataMessage('sales', `予測チャート描画エラー: ${error.message}`);
+        showNoDataMessage('profit', `予測チャート描画エラー: ${error.message}`);
     }
 
     // 2. クラスタリングチャートの描画
     try {
         if (window.clusterInfo?.chart_data) {
             console.log('DEBUG: Rendering clustering chart...');
+            console.log('DEBUG: Clustering chart data structure:', window.clusterInfo.chart_data);
             const clusteringCanvas = document.getElementById('clustering-chart');
             if (clusteringCanvas) {
                 renderClusteringChart('clustering-chart', window.clusterInfo.chart_data);
             } else {
-                console.warn('WARNING: Clustering chart canvas not found');
+                console.log('DEBUG: Clustering chart canvas not found');
+                showChartError('clustering-chart', 'クラスタリングチャート要素が見つかりません');
             }
         } else {
             console.warn('WARNING: No clustering info available for chart rendering');
+            console.log('DEBUG: clusterInfo structure:', window.clusterInfo);
+            showChartError('clustering-chart', 'クラスタリング分析データが利用できません（データ不足）');
         }
     } catch (error) {
         console.error('ERROR: Failed to render clustering chart:', error);
+        showChartError('clustering-chart', `クラスタリングチャート描画エラー: ${error.message}`);
     }
 
     // 3. ポジショニングチャートの描画
     try {
-        if (window.positioningInfo?.chart_data) {
+        console.log('DEBUG: Checking positioning chart data...');
+        console.log('DEBUG: window.positioningInfo:', window.positioningInfo);
+        
+        // ポジショニングデータの構造を確認
+        const hasChartData = window.positioningInfo?.chart || window.positioningInfo?.datasets;
+        console.log('DEBUG: hasChartData:', hasChartData);
+        
+        if (hasChartData) {
             console.log('DEBUG: Rendering positioning chart...');
             const positioningCanvas = document.getElementById('positioning-chart');
             if (positioningCanvas) {
-                renderPositioningChart('positioning-chart', window.positioningInfo.chart_data);
+                // chart プロパティがある場合はそれを使用、無い場合は全体を使用
+                const chartData = window.positioningInfo.chart || window.positioningInfo;
+                console.log('DEBUG: Using chart data:', chartData);
+                renderPositioningChart('positioning-chart', chartData);
             } else {
                 console.warn('WARNING: Positioning chart canvas not found');
+                showChartError('positioning-chart', 'ポジショニングチャートの表示要素が見つかりません');
             }
         } else {
-            console.warn('WARNING: No positioning info available for chart rendering');
+            console.warn('WARNING: No positioning chart data available');
+            console.log('DEBUG: positioningInfo keys:', window.positioningInfo ? Object.keys(window.positioningInfo) : 'null');
+            
+            // Note: ポジショニング分析は updatePositioningAnalysis で別途処理される
+            console.log('DEBUG: Positioning analysis will be handled by updatePositioningAnalysis');
         }
     } catch (error) {
         console.error('ERROR: Failed to render positioning chart:', error);
+        showChartError('positioning-chart', `ポジショニングチャート描画エラー: ${error.message}`);
     }
 
     // 4. シナリオ分析の読み込み（チャート描画後）
     setTimeout(() => {
         try {
             console.log('DEBUG: Loading scenario analysis...');
+            // canvas要素の存在確認後にシナリオ分析をロード
+            const salesCanvas = document.getElementById('sales-chart');
+            const profitCanvas = document.getElementById('profit-chart');
+            console.log('DEBUG: Canvas elements found - sales:', !!salesCanvas, 'profit:', !!profitCanvas);
+            
             loadChartScenarioAnalysis();
         } catch (error) {
             console.error('ERROR: Failed to load scenario analysis:', error);
         }
-    }, 200); // チャート描画の完了を待つ
+    }, 500); // チャート描画と動的要素作成の完了を待つ
 
     console.log('DEBUG: Synchronized chart rendering completed');
 }
@@ -494,115 +587,13 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(checkAndTest, 2000); // 初期ロードから2秒後に開始
 });
 
-function renderClusteringChart(canvasId, chartData) {
-    try {
-        console.log(`DEBUG: Starting clustering chart render for ID: ${canvasId}`);
-        console.log('DEBUG: Clustering chart data:', chartData);
-        
-        // Chart.js ライブラリの確認
-        if (typeof Chart === 'undefined') {
-            console.error('ERROR: Chart.js library is not loaded');
-            showChartError(canvasId, 'Chart.js ライブラリが読み込まれていません');
-            return;
-        }
-        
-        // Canvas要素の存在確認
-        const ctx = document.getElementById(canvasId);
-        if (!ctx) {
-            console.error(`ERROR: Canvas element with ID ${canvasId} not found`);
-            showChartError(canvasId, `チャート要素 ${canvasId} が見つかりません`);
-            return;
-        }
-
-        // データ構造の検証
-        if (!chartData) {
-            console.error('ERROR: Chart data is null or undefined');
-            showChartError(canvasId, 'チャートデータが見つかりません');
-            return;
-        }
-
-        if (!chartData.datasets || !Array.isArray(chartData.datasets)) {
-            console.error('ERROR: Invalid datasets in chart data');
-            showChartError(canvasId, '無効なデータセット構造です');
-            return;
-        }
-
-        console.log('DEBUG: Clustering chart validation passed, creating chart...');
-
-        // 既存のチャートを破棄
-        if (ctx.chart) {
-            ctx.chart.destroy();
-        }
-
-        ctx.chart = new Chart(ctx, {
-            type: 'scatter',
-            data: {
-                datasets: chartData.datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: chartData.title || 'クラスタリング分析',
-                        font: {
-                            size: 16,
-                            weight: 'bold'
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const label = context.dataset.label || '';
-                                const name = context.raw.name || '';
-                                return `${name} (${label}): UMAP1 ${context.raw.x}, UMAP2 ${context.raw.y}`;
-                            }
-                        }
-                    },
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    }
-                },
-                scales: {
-                    x: {
-                        type: 'linear',
-                        position: 'bottom',
-                        title: {
-                            display: true,
-                            text: chartData.x_axis_label || 'UMAP 1'
-                        }
-                    },
-                    y: {
-                        type: 'linear',
-                        position: 'left',
-                        title: {
-                            display: true,
-                            text: chartData.y_axis_label || 'UMAP 2'
-                        }
-                    }
-                }
-            }
-        });
-
-        console.log('DEBUG: Clustering chart created successfully:', ctx.chart);
-
-        // 説明文の更新
-        const descriptionElement = document.querySelector('.clustering-analysis-content .description-text');
-        if (descriptionElement && chartData.description) {
-            descriptionElement.innerHTML = chartData.description.replace(/\n/g, '<br>');
-        }
-
-    } catch (error) {
-        console.error('ERROR: Clustering chart rendering failed:', error);
-        showChartError(canvasId, 'クラスタリングチャートの表示に失敗しました: ' + error.message);
-    }
-}
+// Primary clustering chart function - removed duplicate
 
 async function renderChart(canvasId, chartData) {
     try {
         console.log(`DEBUG: Starting chart render for ID: ${canvasId}`);
+        console.log('DEBUG: CRITICAL - Canvas ID being used:', canvasId);
+        console.log('DEBUG: Stack trace:', new Error().stack);
         console.log('DEBUG: Chart data structure:', {
             hasLabels: !!chartData?.labels,
             labelsLength: chartData?.labels?.length,
@@ -623,8 +614,9 @@ async function renderChart(canvasId, chartData) {
         const ctx = document.getElementById(canvasId);
         if (!ctx) {
             console.error(`ERROR: Canvas element with ID ${canvasId} not found`);
-            showChartError(canvasId, `チャート要素 ${canvasId} が見つかりません`);
-            return;
+            console.error('ERROR: Available canvas elements:', Array.from(document.querySelectorAll('canvas')).map(c => c.id));
+            console.error('ERROR: All elements with IDs containing "chart":', Array.from(document.querySelectorAll('[id*="chart"]')).map(e => e.id));
+            throw new Error(`Canvas element with ID "${canvasId}" not found`);
         }
         
         // Canvas要素の表示状態確認
@@ -662,7 +654,7 @@ async function renderChart(canvasId, chartData) {
         
         // Chart.js設定の検証
         const chartConfig = {
-            type: 'line',
+            type: chartData.type || 'line',
             data: {
                 labels: chartData.labels,
                 datasets: chartData.datasets
@@ -670,33 +662,67 @@ async function renderChart(canvasId, chartData) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                aspectRatio: 2,
                 plugins: {
                     title: {
                         display: true,
                         text: chartData.title || 'チャート',
                         font: {
-                            size: 16,
+                            size: 18,
                             weight: 'bold'
-                        }
+                        },
+                        padding: 20
                     },
                     tooltip: {
                         mode: 'index',
-                        intersect: false
+                        intersect: false,
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: 'white',
+                        bodyColor: 'white',
+                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        borderWidth: 1
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true
+                        }
                     }
                 },
                 scales: {
                     x: {
+                        type: 'linear',
                         title: {
                             display: true,
-                            text: '年度'
+                            text: '年度',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
                         }
                     },
                     y: {
                         title: {
                             display: true,
-                            text: chartData.ylabel || '値'
+                            text: chartData.ylabel || '値',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
                         }
                     }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
                 }
             }
         };
@@ -767,36 +793,402 @@ async function renderChart(canvasId, chartData) {
     }
 }
 
-function showChartError(canvasId, message) {
-    console.error(`Chart error for ${canvasId}: ${message}`);
+// Duplicate showChartError function removed - using primary version below
+
+/**
+ * クラスタリングチャートを描画
+ */
+function renderClusteringChart(canvasId, chartData) {
+    console.log(`DEBUG: Rendering clustering chart for canvas ID: ${canvasId}`);
+    console.log(`DEBUG: Clustering chart data:`, chartData);
     
-    const ctx = document.getElementById(canvasId);
-    if (ctx) {
-        const container = ctx.parentElement;
-        if (container) {
-            // Canvas要素を隠す
-            ctx.style.display = 'none';
-            
-            // エラー表示要素を作成
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'chart-error-container';
-            errorDiv.innerHTML = `
-                <div class="chart-error-icon">⚠️</div>
-                <p class="chart-error-message">${message}</p>
-                <p class="chart-error-message" style="font-size: 12px; margin-top: 10px; opacity: 0.7;">Chart ID: ${canvasId}</p>
-            `;
-            
-            // 既存のエラー表示を削除
-            const existingError = container.querySelector('.chart-error-container');
-            if (existingError) {
-                existingError.remove();
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.error(`Canvas element with ID "${canvasId}" not found`);
+        showChartError(canvasId, `チャート要素 ${canvasId} が見つかりません`);
+        return;
+    }
+    
+    // データ構造の検証
+    if (!chartData || !chartData.datasets || !Array.isArray(chartData.datasets)) {
+        console.error('ERROR: Invalid chart data structure for clustering chart');
+        showChartError(canvasId, 'クラスタリングチャートデータが無効です');
+        return;
+    }
+    
+    // 既存のChart.jsインスタンスがあれば破棄
+    if (window.chartInstances && window.chartInstances[canvasId]) {
+        console.log(`DEBUG: Destroying existing clustering chart instance for ${canvasId}`);
+        window.chartInstances[canvasId].destroy();
+    }
+    
+    if (!window.chartInstances) {
+        window.chartInstances = {};
+    }
+    
+    const ctx = canvas.getContext('2d');
+    console.log(`DEBUG: Canvas context acquired for ${canvasId}:`, ctx);
+    
+    try {
+        const config = {
+            type: 'scatter',
+            data: {
+                datasets: chartData.datasets || []
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom',
+                        title: {
+                            display: true,
+                            text: chartData.x_axis_label || 'X軸'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: chartData.y_axis_label || 'Y軸'
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: chartData.title || 'クラスタリング分析'
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                }
             }
-            
-            // 新しいエラー表示を追加
-            container.style.position = 'relative';
-            container.appendChild(errorDiv);
+        };
+        
+        const chart = new Chart(ctx, config);
+        window.chartInstances[canvasId] = chart;
+        
+        console.log(`DEBUG: Successfully created clustering chart for ${canvasId}`);
+        console.log(`DEBUG: Chart instance:`, chart);
+        console.log(`DEBUG: Chart datasets:`, chart.data.datasets.length);
+        return chart;
+        
+    } catch (error) {
+        console.error(`ERROR: Failed to create clustering chart for ${canvasId}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * ポジショニングチャートを描画
+ */
+function renderPositioningChart(canvasId, chartData) {
+    console.log(`DEBUG: Rendering positioning chart for canvas ID: ${canvasId}`);
+    console.log(`DEBUG: Positioning chart data:`, chartData);
+    
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.error(`Canvas element with ID "${canvasId}" not found`);
+        showChartError(canvasId, `チャート要素 ${canvasId} が見つかりません`);
+        return;
+    }
+    
+    // データ構造の検証
+    if (!chartData || !chartData.datasets || !Array.isArray(chartData.datasets)) {
+        console.error('ERROR: Invalid chart data structure for positioning chart');
+        showChartError(canvasId, 'ポジショニングチャートデータが無効です');
+        return;
+    }
+    
+    // 既存のChart.jsインスタンスがあれば破棄
+    if (window.chartInstances && window.chartInstances[canvasId]) {
+        console.log(`DEBUG: Destroying existing positioning chart instance for ${canvasId}`);
+        window.chartInstances[canvasId].destroy();
+    }
+    
+    if (!window.chartInstances) {
+        window.chartInstances = {};
+    }
+    
+    const ctx = canvas.getContext('2d');
+    console.log(`DEBUG: Canvas context acquired for positioning ${canvasId}:`, ctx);
+    
+    try {
+        // 象限背景色とライン描画用プラグイン
+        const quadrantPlugin = {
+            id: 'quadrantPlugin',
+            beforeDraw: (chart) => {
+                const ctx = chart.ctx;
+                const {left, top, width, height} = chart.chartArea;
+                
+                // 象限背景色の描画
+                const quadrants = [
+                    {x: left + width/2, y: top, w: width/2, h: height/2, color: 'rgba(40, 167, 69, 0.1)'}, // 理想（右上）
+                    {x: left, y: top, w: width/2, h: height/2, color: 'rgba(255, 193, 7, 0.1)'}, // チャレンジ（左上）
+                    {x: left + width/2, y: top + height/2, w: width/2, h: height/2, color: 'rgba(23, 162, 184, 0.1)'}, // 安定（右下）
+                    {x: left, y: top + height/2, w: width/2, h: height/2, color: 'rgba(220, 53, 69, 0.1)'} // 要注意（左下）
+                ];
+                
+                quadrants.forEach(quad => {
+                    ctx.fillStyle = quad.color;
+                    ctx.fillRect(quad.x, quad.y, quad.w, quad.h);
+                });
+                
+                // 50%基準線の描画
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                
+                // 縦線（成長性50%）
+                ctx.beginPath();
+                ctx.moveTo(left + width/2, top);
+                ctx.lineTo(left + width/2, top + height);
+                ctx.stroke();
+                
+                // 横線（安定性50%）
+                ctx.beginPath();
+                ctx.moveTo(left, top + height/2);
+                ctx.lineTo(left + width, top + height/2);
+                ctx.stroke();
+                
+                ctx.setLineDash([]);
+                
+                // 象限ラベル
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                
+                const labelOffset = 15;
+                ctx.fillText('理想企業', left + width*0.75, top + labelOffset);
+                ctx.fillText('チャレンジ企業', left + width*0.25, top + labelOffset);
+                ctx.fillText('安定企業', left + width*0.75, top + height - labelOffset);
+                ctx.fillText('要注意企業', left + width*0.25, top + height - labelOffset);
+            }
+        };
+
+        const config = {
+            type: 'scatter',
+            data: {
+                datasets: chartData.datasets || []
+            },
+            plugins: [quadrantPlugin],
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'linear',
+                        position: 'bottom',
+                        min: 0,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: chartData.x_axis_label || '成長性スコア',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                            stepSize: 25
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        min: 0,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: chartData.y_axis_label || '安定性スコア',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                            stepSize: 25
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: chartData.title || 'ポジショニング分析（成長性 × 安定性）',
+                        font: {
+                            size: 18,
+                            weight: 'bold'
+                        },
+                        padding: 20
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            padding: 15,
+                            usePointStyle: true
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: 'white',
+                        bodyColor: 'white',
+                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        borderWidth: 1,
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.dataset.label || '';
+                                const name = context.raw.name || '';
+                                return `${name} (${label}): 成長性 ${context.raw.x}点, 安定性 ${context.raw.y}点`;
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        
+        const chart = new Chart(ctx, config);
+        window.chartInstances[canvasId] = chart;
+        
+        console.log(`DEBUG: Successfully created positioning chart for ${canvasId}`);
+        console.log(`DEBUG: Chart instance:`, chart);
+        console.log(`DEBUG: Chart datasets:`, chart.data.datasets.length);
+        return chart;
+        
+    } catch (error) {
+        console.error(`ERROR: Failed to create positioning chart for ${canvasId}:`, error);
+        throw error;
+    }
+}
+
+/**
+ * チャートエラーを表示
+ */
+function showChartError(canvasId, errorMessage) {
+    console.log(`DEBUG: Showing chart error for ${canvasId}: ${errorMessage}`);
+    
+    const canvas = document.getElementById(canvasId);
+    if (canvas) {
+        const container = canvas.parentElement;
+        if (container) {
+            container.innerHTML = `
+                <div class="chart-error">
+                    <div class="error-icon">⚠️</div>
+                    <p class="error-message">${errorMessage}</p>
+                    <p class="error-help">ページを再読み込みするか、しばらく待ってから再試行してください。</p>
+                </div>
+            `;
         }
     }
+}
+
+/**
+ * 動的にチャートを作成して描画する
+ */
+function createAndRenderChart(chartType, predictionData) {
+    console.log(`DEBUG: Creating dynamic chart for ${chartType}`);
+    console.log(`DEBUG: Prediction data:`, predictionData);
+    
+    // 予測分析セクションを探す（predictions-contentの中に挿入）
+    const analysisSection = document.querySelector('.predictions-content');
+    if (!analysisSection) {
+        console.error(`ERROR: Could not find predictions content section for ${chartType}`);
+        console.error(`DEBUG: Available containers:`, Array.from(document.querySelectorAll('[class*="prediction"], [class*="analysis"]')).map(el => el.className));
+        return;
+    }
+    
+    console.log(`DEBUG: Found analysis section for ${chartType}:`, analysisSection);
+    
+    // チャートコンテナを作成
+    const chartContainer = document.createElement('div');
+    chartContainer.className = 'prediction-item dynamic-chart';
+    chartContainer.innerHTML = `
+        <h4>${predictionData.label}の予測</h4>
+        <div class="chart-container">
+            <canvas id="${chartType}-chart" class="prediction-chart" data-chart-metric="${chartType === 'sales' ? 'net_sales' : 'net_income'}"></canvas>
+        </div>
+        <div class="chart-ai-analysis" data-chart-type="${chartType}" data-metric="${chartType === 'sales' ? 'net_sales' : 'net_income'}">
+            <h5>🤖 AI分析</h5>
+            <div class="${chartType === 'sales' ? 'sales' : 'profit'}-scenarios">
+                <div class="scenario optimistic">
+                    <h6>楽観シナリオ</h6>
+                    <p class="scenario-explanation">分析中...</p>
+                </div>
+                <div class="scenario current">
+                    <h6>現状シナリオ</h6>
+                    <p class="scenario-explanation">分析中...</p>
+                </div>
+                <div class="scenario pessimistic">
+                    <h6>悲観シナリオ</h6>
+                    <p class="scenario-explanation">分析中...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 既存の"no-data"メッセージがあれば削除
+    const existingNoData = analysisSection.querySelector('.no-data');
+    if (existingNoData) {
+        existingNoData.remove();
+    }
+    
+    // チャートコンテナを追加
+    analysisSection.appendChild(chartContainer);
+    console.log(`DEBUG: Successfully added chart container for ${chartType} to DOM`);
+    console.log(`DEBUG: Chart container HTML:`, chartContainer.outerHTML);
+    
+    // チャートを描画
+    setTimeout(async () => {
+        try {
+            await renderChart(`${chartType}-chart`, predictionData.chart_data);
+            console.log(`DEBUG: Successfully rendered dynamic ${chartType} chart`);
+        } catch (error) {
+            console.error(`ERROR: Failed to render dynamic ${chartType} chart:`, error);
+            showChartError(`${chartType}-chart`, `チャート描画エラー: ${error.message}`);
+        }
+    }, 100);
+}
+
+/**
+ * データがない場合のメッセージを表示
+ */
+function showNoDataMessage(chartType, message) {
+    console.log(`DEBUG: Showing no-data message for ${chartType}: ${message}`);
+    
+    // 予測分析セクションを探す（predictions-contentの中に挿入）
+    const analysisSection = document.querySelector('.predictions-content');
+    if (!analysisSection) {
+        console.error(`ERROR: Could not find predictions content section for ${chartType}`);
+        return;
+    }
+    
+    // 既存のno-dataメッセージを探す
+    let noDataContainer = analysisSection.querySelector('.no-data');
+    
+    if (!noDataContainer) {
+        // no-dataコンテナが存在しない場合は作成
+        noDataContainer = document.createElement('div');
+        noDataContainer.className = 'no-data';
+        analysisSection.appendChild(noDataContainer);
+    }
+    
+    // メッセージを追加
+    const messageElement = document.createElement('div');
+    messageElement.className = 'no-data-item';
+    messageElement.innerHTML = `
+        <div class="no-data-icon">📊</div>
+        <p class="no-data-message">${message}</p>
+        <p class="no-data-type">${chartType === 'sales' ? '売上高予測' : '純利益予測'}</p>
+    `;
+    
+    noDataContainer.appendChild(messageElement);
 }
 
 /**
@@ -807,6 +1199,7 @@ function updateAnalysisContent(aiAnalysis) {
     console.log('DEBUG: AI Analysis object:', aiAnalysis);
     updateScenarioAnalysis(aiAnalysis);
     updatePositioningAnalysis(aiAnalysis);
+    updateClusteringAnalysis(aiAnalysis);
     updateSummaryAnalysis(aiAnalysis);
     updateCompanyOverview(aiAnalysis);
 }
@@ -850,8 +1243,90 @@ function updateScenarioAnalysis(aiAnalysis) {
  * ポジショニング分析を更新
  */
 function updatePositioningAnalysis(aiAnalysis) {
+    console.log('DEBUG: Updating positioning analysis...');
+    console.log('DEBUG: Positioning info:', aiAnalysis.positioning_info);
+    
     if (aiAnalysis.POSITIONING_ANALYSIS) {
         updateElement('.positioning-explanation', aiAnalysis.POSITIONING_ANALYSIS);
+    }
+    
+    // ポジショニングデータが利用可能な場合は表示
+    if (aiAnalysis.positioning_info) {
+        console.log('DEBUG: Displaying positioning results...');
+        displayPositioningAnalysis(aiAnalysis.positioning_info);
+    }
+}
+
+/**
+ * クラスタリング分析を更新
+ */
+function updateClusteringAnalysis(aiAnalysis) {
+    console.log('DEBUG: Updating clustering analysis...');
+    console.log('DEBUG: Cluster info:', aiAnalysis.cluster_info);
+    
+    const clusteringLoading = document.querySelector('.clustering-loading');
+    const clusteringContent = document.querySelector('.clustering-content');
+    const clusteringError = document.querySelector('.clustering-error');
+    
+    if (!clusteringLoading || !clusteringContent || !clusteringError) {
+        console.warn('WARNING: Clustering display elements not found');
+        return;
+    }
+    
+    if (aiAnalysis.cluster_info && aiAnalysis.cluster_info.cluster_id !== undefined) {
+        console.log('DEBUG: Displaying clustering results...');
+        
+        // Hide loading and error, show content
+        clusteringLoading.style.display = 'none';
+        clusteringError.style.display = 'none';
+        clusteringContent.style.display = 'block';
+        
+        // Update cluster information
+        const clusterTitle = clusteringContent.querySelector('.cluster-title');
+        const clusterYear = clusteringContent.querySelector('.cluster-year');
+        const similarCompaniesList = clusteringContent.querySelector('.similar-companies-list');
+        const characteristicsContainer = clusteringContent.querySelector('.characteristics-container');
+        
+        if (clusterTitle) {
+            clusterTitle.textContent = `クラスタ${aiAnalysis.cluster_info.cluster_id} (全${aiAnalysis.cluster_info.total_clusters}クラスタ中)`;
+        }
+        
+        if (clusterYear) {
+            clusterYear.textContent = `データ年度: ${aiAnalysis.cluster_info.company_year}年`;
+        }
+        
+        // Update similar companies
+        if (similarCompaniesList && aiAnalysis.cluster_info.same_cluster_companies) {
+            similarCompaniesList.innerHTML = '';
+            aiAnalysis.cluster_info.same_cluster_companies.forEach(company => {
+                const li = document.createElement('li');
+                li.textContent = `${company.name} (${company.year}年)`;
+                similarCompaniesList.appendChild(li);
+            });
+        }
+        
+        // Update cluster characteristics
+        if (characteristicsContainer && aiAnalysis.cluster_info.cluster_characteristics) {
+            characteristicsContainer.innerHTML = '';
+            Object.entries(aiAnalysis.cluster_info.cluster_characteristics).forEach(([feature, data]) => {
+                const div = document.createElement('div');
+                div.className = 'characteristic-item';
+                div.innerHTML = `
+                    <span class="characteristic-label">${feature}:</span>
+                    <span class="characteristic-value">${data.relative > 0 ? '+' : ''}${data.relative.toFixed(1)}%</span>
+                `;
+                characteristicsContainer.appendChild(div);
+            });
+        }
+        
+        console.log('DEBUG: Clustering content updated successfully');
+    } else {
+        console.log('DEBUG: No clustering data available, showing error');
+        
+        // Hide loading and content, show error
+        clusteringLoading.style.display = 'none';
+        clusteringContent.style.display = 'none';
+        clusteringError.style.display = 'block';
     }
 }
 
@@ -958,6 +1433,21 @@ function showNotification(message, type = 'info') {
 
 // ページ読み込み時の初期化
 document.addEventListener('DOMContentLoaded', function() {
+    // Chart.jsの読み込み確認
+    console.log('DEBUG: Chart.js loaded:', typeof Chart !== 'undefined');
+    if (typeof Chart === 'undefined') {
+        console.error('ERROR: Chart.js is not loaded!');
+        // ユーザーに表示
+        const chartContainers = document.querySelectorAll('.chart-container');
+        chartContainers.forEach(container => {
+            container.innerHTML = '<div class="chart-error">Chart.jsライブラリが読み込まれていません。ページを再読み込みしてください。</div>';
+        });
+    } else {
+        console.log('DEBUG: Chart.js version:', Chart.version);
+        console.log('DEBUG: Chart.js registry available:', !!Chart.registry);
+        console.log('DEBUG: Chart.js plugins available:', !!Chart.registry?.plugins);
+    }
+    
     // デフォルトで財務データタブを表示
     showTab('financial-data');
     
@@ -1092,29 +1582,100 @@ function scrollToElement(elementId) {
  * 各チャートに対して3シナリオ分析をロード
  */
 function loadChartScenarioAnalysis() {
-    console.log('Loading chart scenario analysis...');
-    const chartAnalysisSections = document.querySelectorAll('.chart-ai-analysis');
-    console.log(`Found ${chartAnalysisSections.length} chart analysis sections`);
+    console.log('DEBUG: Loading chart scenario analysis...');
     
-    chartAnalysisSections.forEach((section, index) => {
-        const chartType = section.getAttribute('data-chart-type');
-        const metric = section.getAttribute('data-metric');
-        console.log(`Section ${index}: chart-type = ${chartType}, metric = ${metric}`);
-        console.log(`Section ${index} element:`, section);
-        
-        if (chartType && window.predictionResults && window.predictionResults[metric]) {
-            const chartData = window.predictionResults[metric].chart_data;
-            if (chartData) {
-                const canvasId = `${window.predictionResults[metric].label}_chart`;
-                renderChart(canvasId, chartData);
-            }
-            console.log(`Loading scenario analysis for chart type: ${chartType}`);
-            loadScenarioAnalysisInternal(chartType, section);
-        } else {
-            console.warn(`Section ${index} has no data-chart-type attribute or prediction results are missing.`);
-            console.warn(`Section ${index} HTML:`, section.outerHTML);
+    // 実行状態の管理 - 重複実行を防ぐ
+    if (window.scenarioAnalysisState?.isLoading) {
+        console.log('DEBUG: Scenario analysis already in progress, skipping duplicate call');
+        return;
+    }
+    
+    if (window.scenarioAnalysisState?.isCompleted) {
+        console.log('DEBUG: Scenario analysis already completed, skipping duplicate call');
+        return;
+    }
+    
+    // 初期化状態
+    if (!window.scenarioAnalysisState) {
+        window.scenarioAnalysisState = {
+            isLoading: false,
+            isCompleted: false,
+            processedCharts: new Set()
+        };
+    }
+    
+    // 実行開始
+    window.scenarioAnalysisState.isLoading = true;
+    
+    try {
+        // チャート描画が完了しているかチェック
+        if (!window.predictionResults) {
+            console.warn('WARNING: No prediction results available for scenario analysis');
+            window.scenarioAnalysisState.isLoading = false;
+            return;
         }
-    });
+        
+        const chartAnalysisSections = document.querySelectorAll('.chart-ai-analysis');
+        console.log(`DEBUG: Found ${chartAnalysisSections.length} chart analysis sections`);
+        
+        let processedCount = 0;
+        
+        chartAnalysisSections.forEach((section, index) => {
+            const chartType = section.getAttribute('data-chart-type');
+            const metric = section.getAttribute('data-metric');
+            console.log(`DEBUG: Section ${index}: chart-type = ${chartType}, metric = ${metric}`);
+            
+            // 既に処理済みのチャートをスキップ
+            if (window.scenarioAnalysisState.processedCharts.has(chartType)) {
+                console.log(`DEBUG: Chart type ${chartType} already processed, skipping`);
+                return;
+            }
+            
+            if (chartType && window.predictionResults && window.predictionResults[metric]) {
+                const chartData = window.predictionResults[metric].chart_data;
+                if (chartData) {
+                    // 英語のIDを使用（HTMLのcanvas要素と一致）
+                    const canvasId = chartType === 'sales' ? 'sales-chart' : 'profit-chart';
+                    console.log(`DEBUG: Processing chart with ID: ${canvasId}`);
+                    
+                    const canvas = document.getElementById(canvasId);
+                    if (canvas) {
+                        // 既存のチャートインスタンスがない場合のみ描画
+                        if (!window.chartInstances || !window.chartInstances[canvasId]) {
+                            console.log(`DEBUG: Rendering chart ${canvasId} for first time`);
+                            renderChart(canvasId, chartData);
+                        } else {
+                            console.log(`DEBUG: Chart ${canvasId} already exists, skipping render`);
+                        }
+                        
+                        // 処理済みマークを追加
+                        window.scenarioAnalysisState.processedCharts.add(chartType);
+                        processedCount++;
+                    } else {
+                        console.warn(`DEBUG: Canvas element ${canvasId} not found, will retry later`);
+                    }
+                }
+                
+                console.log(`DEBUG: Loading scenario analysis for chart type: ${chartType}`);
+                loadScenarioAnalysisInternal(chartType, section);
+            } else {
+                console.warn(`DEBUG: Section ${index} missing data - chartType: ${chartType}, hasMetricData: ${!!(window.predictionResults && window.predictionResults[metric])}`);
+            }
+        });
+        
+        console.log(`DEBUG: Processed ${processedCount} charts in this run`);
+        
+        // 完了状態の設定
+        if (processedCount > 0 || chartAnalysisSections.length === 0) {
+            window.scenarioAnalysisState.isCompleted = true;
+            console.log('DEBUG: Scenario analysis completed successfully');
+        }
+        
+    } catch (error) {
+        console.error('ERROR: Chart scenario analysis failed:', error);
+    } finally {
+        window.scenarioAnalysisState.isLoading = false;
+    }
 }
 
 /**
@@ -1383,8 +1944,22 @@ function displayPositioningAnalysis(positioningData) {
         }
         
         // ポジショニングマップをChart.jsで描画
-        if (positioningData.chart) {
-            renderPositioningChart('positioning-chart', positioningData.chart);
+        console.log('DEBUG: Checking positioning chart data...');
+        console.log('DEBUG: positioningData.chart:', positioningData.chart);
+        
+        if (positioningData.chart && positioningData.chart.datasets) {
+            console.log('DEBUG: Rendering positioning chart with datasets count:', positioningData.chart.datasets.length);
+            try {
+                renderPositioningChart('positioning-chart', positioningData.chart);
+                console.log('DEBUG: Positioning chart rendered successfully');
+            } catch (error) {
+                console.error('ERROR: Failed to render positioning chart:', error);
+                showChartError('positioning-chart', `チャート描画エラー: ${error.message}`);
+            }
+        } else {
+            console.warn('WARNING: No chart data available for positioning analysis');
+            console.log('DEBUG: Available positioning data keys:', Object.keys(positioningData));
+            showChartError('positioning-chart', 'ポジショニングチャートデータが不足しています');
         }
         
         const adviceElement = document.querySelector('.advice-text');
@@ -1440,148 +2015,7 @@ function displayPositioningAnalysis(positioningData) {
     }
 }
 
-function renderPositioningChart(canvasId, chartData) {
-    try {
-        console.log(`DEBUG: Starting positioning chart render for ID: ${canvasId}`);
-        console.log('DEBUG: Positioning chart data:', chartData);
-        
-        // Chart.js ライブラリの確認
-        if (typeof Chart === 'undefined') {
-            console.error('ERROR: Chart.js library is not loaded');
-            showChartError(canvasId, 'Chart.js ライブラリが読み込まれていません');
-            return;
-        }
-        
-        // Canvas要素の存在確認
-        const ctx = document.getElementById(canvasId);
-        if (!ctx) {
-            console.error(`ERROR: Canvas element with ID ${canvasId} not found`);
-            showChartError(canvasId, `チャート要素 ${canvasId} が見つかりません`);
-            return;
-        }
-
-        // データ構造の検証
-        if (!chartData) {
-            console.error('ERROR: Chart data is null or undefined');
-            showChartError(canvasId, 'チャートデータが見つかりません');
-            return;
-        }
-
-        if (!chartData.datasets || !Array.isArray(chartData.datasets)) {
-            console.error('ERROR: Invalid datasets in chart data');
-            showChartError(canvasId, '無効なデータセット構造です');
-            return;
-        }
-
-        console.log('DEBUG: Positioning chart validation passed, creating chart...');
-
-        // 既存のチャートを破棄
-        if (ctx.chart) {
-            ctx.chart.destroy();
-        }
-
-        ctx.chart = new Chart(ctx, {
-            type: 'scatter',
-            data: {
-                datasets: chartData.datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: chartData.title || '二軸分析（成長性 × 安定性）',
-                        font: {
-                            size: 16,
-                            weight: 'bold'
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const label = context.dataset.label || '';
-                                const name = context.raw.name || '';
-                                return `${name} (${label}): 成長性 ${context.raw.x}点, 安定性 ${context.raw.y}点`;
-                            }
-                        }
-                    },
-                    annotation: {
-                        annotations: {
-                            lineX: {
-                                type: 'line',
-                                xMin: 50, xMax: 50,
-                                borderColor: 'gray',
-                                borderWidth: 1,
-                                borderDash: [5, 5]
-                            },
-                            lineY: {
-                                type: 'line',
-                                yMin: 50, yMax: 50,
-                                borderColor: 'gray',
-                                borderWidth: 1,
-                                borderDash: [5, 5]
-                            },
-                            // 象限の背景色
-                            quadrant1: {
-                                type: 'box',
-                                xMin: 50, xMax: 100, yMin: 50, yMax: 100,
-                                backgroundColor: 'rgba(0, 128, 0, 0.1)',
-                                borderColor: 'rgba(0, 0, 0, 0)'
-                            },
-                            quadrant2: {
-                                type: 'box',
-                                xMin: 0, xMax: 50, yMin: 50, yMax: 100,
-                                backgroundColor: 'rgba(255, 165, 0, 0.1)',
-                                borderColor: 'rgba(0, 0, 0, 0)'
-                            },
-                            quadrant3: {
-                                type: 'box',
-                                xMin: 50, xMax: 100, yMin: 0, yMax: 50,
-                                backgroundColor: 'rgba(0, 0, 255, 0.1)',
-                                borderColor: 'rgba(0, 0, 0, 0)'
-                            },
-                            quadrant4: {
-                                type: 'box',
-                                xMin: 0, xMax: 50, yMin: 0, yMax: 50,
-                                backgroundColor: 'rgba(255, 0, 0, 0.1)',
-                                borderColor: 'rgba(0, 0, 0, 0)'
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        type: 'linear',
-                        position: 'bottom',
-                        title: {
-                            display: true,
-                            text: chartData.x_axis_label || '成長性'
-                        },
-                        min: 0,
-                        max: 100
-                    },
-                    y: {
-                        type: 'linear',
-                        position: 'left',
-                        title: {
-                            display: true,
-                            text: chartData.y_axis_label || '安定性'
-                        },
-                        min: 0,
-                        max: 100
-                    }
-                }
-            }
-        });
-
-        console.log('DEBUG: Positioning chart created successfully:', ctx.chart);
-
-    } catch (error) {
-        console.error('ERROR: Positioning chart rendering failed:', error);
-        showChartError(canvasId, 'ポジショニングチャートの表示に失敗しました: ' + error.message);
-    }
-}
+// This function is replaced by the improved renderPositioningChart function above
 
 /**
  * 二軸分析エラーを表示

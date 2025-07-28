@@ -83,6 +83,7 @@ def company_detail(request, edinet_code):
     ai_analysis = {}
     positioning_info = None
     
+    import time
     return render(request, 'financial/company_detail.html', {
         'company_name': company_name,
         'edinet_code': edinet_code,
@@ -92,6 +93,7 @@ def company_detail(request, edinet_code):
         'ai_analysis': ai_analysis,
         'positioning_info': positioning_info,
         'show_login_prompt': not request.user.is_authenticated,
+        'timestamp': int(time.time()),  # キャッシュバスティング用
     })
 
 
@@ -100,14 +102,23 @@ def ai_analysis_ajax(request, edinet_code):
         return JsonResponse({'error': 'ログインが必要です'}, status=401)
     
     try:
+        print(f"=== AI ANALYSIS DEBUG START for {edinet_code} ===")
+        
         financial_data = FinancialData.objects.filter(
             edinet_code=edinet_code
         ).select_related('document').order_by('-fiscal_year')
         
+        print(f"DEBUG: Financial data query result - Count: {financial_data.count()}")
         if not financial_data.exists():
+            print(f"ERROR: No financial data found for {edinet_code}")
             return JsonResponse({'error': '企業データが見つかりません'}, status=404)
         
+        # 財務データの詳細情報をログ出力
+        for i, fd in enumerate(financial_data[:5]):  # 最初の5件のみ
+            print(f"DEBUG: Financial data [{i}] - Year: {fd.fiscal_year}, Sales: {fd.net_sales}, Income: {fd.net_income}")
+        
         company_name = financial_data.first().filer_name
+        print(f"DEBUG: Company name: {company_name}")
         
         data_with_indicators = []
         for fd in financial_data:
@@ -117,28 +128,110 @@ def ai_analysis_ajax(request, edinet_code):
                 'indicators': indicators
             })
         
-        prediction_results = prediction_service.analyze_financial_predictions(data_with_indicators)
-        cluster_info = asyncio.run(clustering_service.get_company_cluster_info(edinet_code))
-        positioning_info = asyncio.run(positioning_service.get_company_positioning_analysis(edinet_code))
+        print(f"DEBUG: Data with indicators prepared - Count: {len(data_with_indicators)}")
         
-        ai_analysis = ai_analysis_service.generate_comprehensive_analysis(
-            company_name, edinet_code, data_with_indicators, 
-            prediction_results, cluster_info, positioning_info
-        )
+        # 各サービスを個別に実行し、結果を詳細にログ出力
+        prediction_results = None
+        cluster_info = None
+        positioning_info = None
+        service_errors = []
         
-        if 'error' in ai_analysis:
+        # 予測分析サービス
+        try:
+            print("DEBUG: Starting prediction analysis...")
+            prediction_results = prediction_service.analyze_financial_predictions(data_with_indicators)
+            if prediction_results:
+                print(f"DEBUG: Prediction results - Keys: {list(prediction_results.keys())}")
+                for key, result in prediction_results.items():
+                    print(f"DEBUG: Prediction [{key}] - Has chart: {'chart_data' in result}, Has predictions: {'predictions' in result}")
+            else:
+                print("WARNING: Prediction results is None/empty")
+        except Exception as e:
+            error_msg = f"Prediction analysis failed: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            service_errors.append(f"予測分析: {error_msg}")
+        
+        # クラスタリング分析サービス
+        try:
+            print("DEBUG: Starting clustering analysis...")
+            cluster_info = asyncio.run(clustering_service.get_company_cluster_info(edinet_code))
+            if cluster_info:
+                print(f"DEBUG: Cluster info - Keys: {list(cluster_info.keys())}")
+                print(f"DEBUG: Cluster info - ID: {cluster_info.get('cluster_id')}, Total: {cluster_info.get('total_clusters')}")
+            else:
+                print("WARNING: Cluster info is None/empty")
+        except Exception as e:
+            error_msg = f"Clustering analysis failed: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            service_errors.append(f"クラスタリング分析: {error_msg}")
+        
+        # ポジショニング分析サービス
+        try:
+            print("DEBUG: Starting positioning analysis...")
+            positioning_info = asyncio.run(positioning_service.get_company_positioning_analysis(edinet_code))
+            if positioning_info:
+                print(f"DEBUG: Positioning info - Keys: {list(positioning_info.keys())}")
+                print(f"DEBUG: Positioning - Growth: {positioning_info.get('growth_score')}, Stability: {positioning_info.get('stability_score')}")
+            else:
+                print("WARNING: Positioning info is None/empty")
+        except Exception as e:
+            error_msg = f"Positioning analysis failed: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            service_errors.append(f"ポジショニング分析: {error_msg}")
+        
+        # 最低限一つの分析が成功しているかチェック
+        if not any([prediction_results, cluster_info, positioning_info]):
+            error_detail = "; ".join(service_errors) if service_errors else "すべての分析が失敗しました"
+            print(f"ERROR: All analysis services failed - {error_detail}")
             return JsonResponse({
                 'success': False,
-                'error': ai_analysis['error']
+                'error': f'すべての分析サービスが失敗しました: {error_detail}'
             }, status=400)
         
-        # NumPy型をPython標準型に変換
-        safe_prediction_results = convert_numpy_types(prediction_results) if prediction_results else None
-        safe_cluster_info = convert_numpy_types(cluster_info) if cluster_info else None
-        safe_positioning_info = convert_numpy_types(positioning_info) if positioning_info else None
-        safe_ai_analysis = convert_numpy_types(ai_analysis) if ai_analysis else {}
+        # 成功した分析の数をログ出力
+        success_count = sum([bool(prediction_results), bool(cluster_info), bool(positioning_info)])
+        print(f"DEBUG: Analysis success count: {success_count}/3")
+        if service_errors:
+            print(f"DEBUG: Partial failures: {'; '.join(service_errors)}")
         
-        return JsonResponse({
+        # AI分析生成（成功した分析のみで）
+        try:
+            print("DEBUG: Starting comprehensive AI analysis...")
+            ai_analysis = ai_analysis_service.generate_comprehensive_analysis(
+                company_name, edinet_code, data_with_indicators, 
+                prediction_results, cluster_info, positioning_info
+            )
+            
+            if 'error' in ai_analysis:
+                print(f"ERROR: AI analysis generation failed: {ai_analysis['error']}")
+                return JsonResponse({
+                    'success': False,
+                    'error': ai_analysis['error']
+                }, status=400)
+            
+            print(f"DEBUG: AI analysis completed - Keys: {list(ai_analysis.keys())}")
+        except Exception as e:
+            print(f"ERROR: AI analysis exception: {str(e)}")
+            ai_analysis = {}  # 空の分析結果で続行
+        
+        # NumPy型をPython標準型に変換
+        try:
+            safe_prediction_results = convert_numpy_types(prediction_results) if prediction_results else None
+            safe_cluster_info = convert_numpy_types(cluster_info) if cluster_info else None
+            safe_positioning_info = convert_numpy_types(positioning_info) if positioning_info else None
+            safe_ai_analysis = convert_numpy_types(ai_analysis) if ai_analysis else {}
+            
+            print("DEBUG: NumPy type conversion completed")
+        except Exception as e:
+            print(f"ERROR: NumPy conversion failed: {str(e)}")
+            # 変換に失敗した場合は元のデータを使用
+            safe_prediction_results = prediction_results
+            safe_cluster_info = cluster_info
+            safe_positioning_info = positioning_info
+            safe_ai_analysis = ai_analysis if ai_analysis else {}
+        
+        # 応答データの構造をログ出力
+        response_data = {
             'success': True,
             'ai_analysis': {
                 **safe_ai_analysis,  # AI分析のテキスト結果
@@ -146,10 +239,25 @@ def ai_analysis_ajax(request, edinet_code):
                 'cluster_info': safe_cluster_info,  # クラスタリング情報を追加
                 'positioning_info': safe_positioning_info  # ポジショニング情報を追加
             }
-        })
+        }
+        
+        print(f"DEBUG: Response structure - AI analysis keys: {list(safe_ai_analysis.keys())}")
+        print(f"DEBUG: Response - Has prediction_results: {bool(safe_prediction_results)}")
+        print(f"DEBUG: Response - Has cluster_info: {bool(safe_cluster_info)}")
+        print(f"DEBUG: Response - Has positioning_info: {bool(safe_positioning_info)}")
+        
+        if service_errors:
+            response_data['warnings'] = service_errors
+            print(f"DEBUG: Added warnings to response: {service_errors}")
+        
+        print(f"=== AI ANALYSIS DEBUG END for {edinet_code} ===")
+        
+        return JsonResponse(response_data)
         
     except Exception as e:
-        print(f"AI analysis AJAX error: {e}")
+        print(f"ERROR: AI analysis AJAX unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         return JsonResponse({
             'error': f'分析中にエラーが発生しました: {str(e)}'
         }, status=500)
