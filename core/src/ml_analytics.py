@@ -512,7 +512,8 @@ class ClusteringService:
                     'borderWidth': 2,
                     'pointRadius': 5,
                     'pointHoverRadius': 7,
-                    'pointStyle': 'circle'
+                    'pointStyle': 'circle',
+                    'order': 10  # 背景に表示（高い値ほど背面）
                 })
 
         # 対象企業をハイライト
@@ -527,9 +528,10 @@ class ClusteringService:
                 }],
                 'backgroundColor': 'white',  # 塗りつぶしを白に変更
                 'borderColor': 'red',  # 境界線は赤に戻す
-                'borderWidth': 3,
-                'pointRadius': 12,
-                'pointHoverRadius': 15,
+                'borderWidth': 4,  # ボーダーを太くして視認性向上
+                'pointRadius': 15,  # ポイントサイズを大きく
+                'pointHoverRadius': 18,
+                'order': 1,  # 最前面に表示（低い値ほど前面）
                 'pointStyle': 'star'
             })
         
@@ -950,7 +952,8 @@ class PositioningService:
                         'borderWidth': 1,
                         'pointRadius': 5,
                         'pointHoverRadius': 7,
-                        'pointStyle': 'circle'
+                        'pointStyle': 'circle',
+                        'order': 10  # 背景に表示（高い値ほど背面）
                     })
 
         # 対象企業データセット
@@ -964,10 +967,11 @@ class PositioningService:
             }],
             'backgroundColor': target_color,
             'borderColor': 'black',
-            'borderWidth': 2,
-            'pointRadius': 10,
-            'pointHoverRadius': 12,
-            'pointStyle': 'star'
+            'borderWidth': 3,  # ボーダーを太くして視認性向上
+            'pointRadius': 12,  # ポイントサイズを大きく
+            'pointHoverRadius': 15,
+            'pointStyle': 'star',
+            'order': 1  # 最前面に表示（低い値ほど前面）
         })
 
         # 業界平均データセット
@@ -985,7 +989,8 @@ class PositioningService:
                 'borderWidth': 2,
                 'pointRadius': 8,
                 'pointHoverRadius': 10,
-                'pointStyle': 'triangle'
+                'pointStyle': 'triangle',
+                'order': 5  # 中間の表示順序
             })
 
         return {
