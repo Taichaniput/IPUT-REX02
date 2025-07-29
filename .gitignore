@@ -58,3 +58,7 @@ fonts/*.ttf
 test**
 
 **.pkl
+
+**Zone.Identifier
+
+!EDINET-DATAFETCHER/test_outout.py
