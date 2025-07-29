@@ -332,7 +332,6 @@ ai_agent/
 │   └── ml_evaluation/          # 機械学習評価テスト
 ├── requirements.txt            # Python依存関係
 ├── manage.py                   # Django管理コマンド
-├── CLAUDE.md                   # プロジェクト詳細仕様
 └── README.md                   # このファイル
 ```
 
@@ -397,28 +396,10 @@ python test_performance_output.py
 - ユーザープロファイル情報
 - キャリア志向、興味分野等
 
-## 🔗 関連ドキュメント
-
-- [CLAUDE.md](CLAUDE.md) - 詳細な機械学習手法分析
-- [spec.md](spec.md) - システム仕様書
-- [MACHINE_LEARNING_TEST_GUIDE.md](MACHINE_LEARNING_TEST_GUIDE.md) - ML手法評価ガイド
-
-## 🤝 コントリビューション
-
-1. フォークしてください
-2. フィーチャーブランチを作成 (`git checkout -b feature/AmazingFeature`)
-3. 変更をコミット (`git commit -m 'Add some AmazingFeature'`)
-4. ブランチにプッシュ (`git push origin feature/AmazingFeature`)
-5. プルリクエストを作成
-
 ## 📄 ライセンス
 
 このプロジェクトは教育目的で作成されています。
 
-## 📞 サポート
-
-問題や質問がある場合は、Issueを作成してください。
-
-## 🎓 教育目的での使用について
+## 使用について
 
 このシステムは情報系学生の学習・就職活動支援を目的として開発されています。実際の投資判断や企業評価に使用する際は、他の情報源と併せて総合的に判断してください。
