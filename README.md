@@ -1,75 +1,312 @@
 # AI企業分析システム
 
-情報系学生向けの就活支援Webアプリケーション
+IT業界志望の情報系学生を対象とした包括的企業分析プラットフォームです。財務データ、機械学習予測、AI分析を統合し、学生の就職活動における企業選択を客観的データで支援します。
 
-## 機能
+## 📋 目次
 
-- 企業財務データの表示・分析
-- AI予測分析（機械学習モデル）
-- クラスタリング分析（企業ポジショニング）
-- **AI企業分析（Gemini + Tavily Web Search統合）**
+- [システム概要](#システム概要)
+- [主要機能](#主要機能)
+- [技術スタック](#技術スタック)
+- [セットアップ](#セットアップ)
+- [使用方法](#使用方法)
+- [API設定](#api設定)
+- [プロジェクト構成](#プロジェクト構成)
+- [機械学習手法](#機械学習手法)
+- [開発・テスト](#開発テスト)
 
-## セットアップ
+## 🎯 システム概要
 
-### 1. 環境変数設定
+### 目的
+- 情報系学生の就職活動支援
+- 客観的データに基づく企業選択の意思決定支援
+- 機械学習による企業成長性の定量的評価
 
-`.env`ファイルを作成し、以下のAPIキーを設定してください：
+### 対象ユーザー
+- IT業界志望の情報系学生
+- 企業分析に興味のある学生・研究者
 
+### データベース規模
+- **企業数**: 593社
+- **レコード数**: 4,115件
+- **期間**: 2015-2025年（11年間）
+- **完全な時系列データを持つ企業**: 116社（2015-2024年の10年間）
+
+## 🚀 主要機能
+
+### 1. 企業検索・一覧表示
+- キーワードによる企業検索
+- 企業一覧とページネーション
+- 財務指標による絞り込み
+
+### 2. 企業詳細分析
+- **財務データ表示**: 売上高、営業利益、純利益、総資産、純資産、従業員数
+- **財務指標計算**: ROE、ROA、自己資本比率
+- **時系列グラフ**: Chart.jsによるインタラクティブなグラフ表示
+
+### 3. 機械学習による予測分析
+- **成長性予測**: ARIMAモデルによる3年間の財務予測
+- **3シナリオ予測**: 楽観・現状・悲観の3つのシナリオ
+- **不確実性の定量化**: 予測区間の表示
+
+### 4. ポジショニング分析
+- **クラスタリング**: HDBSCANによる企業分類
+- **次元削減**: UMAPによる2次元可視化
+- **競合他社の特定**: 類似企業の発見
+
+### 5. AI生成型分析
+- **Google Gemini統合**: 企業の詳細分析と解釈
+- **Web情報統合**: Tavily APIによる最新企業情報の取得
+- **学生向けカスタマイズ**: IT業界志望学生に特化した分析
+
+### 6. ユーザー管理
+- ユーザー登録・ログイン機能
+- プロファイル管理
+- 個別設定の保存
+
+## 🛠 技術スタック
+
+### バックエンド
+- **Django 5.1.2**: Webフレームワーク
+- **PostgreSQL**: データベース
+- **Python 3.8+**: プログラミング言語
+
+### 機械学習・データ分析
+- **pandas 2.1.3**: データ分析・操作
+- **numpy 1.26.3**: 数値計算
+- **scikit-learn 1.4.2**: 機械学習ライブラリ
+- **umap-learn 0.5.3**: UMAP次元削減
+- **hdbscan 0.8.33**: 密度ベースクラスタリング
+- **statsmodels 0.14.2**: ARIMAモデルなど統計モデリング
+
+### 可視化
+- **matplotlib 3.8.4**: グラフ描画
+- **japanize-matplotlib 1.1.3**: 日本語フォント対応
+- **Chart.js**: フロントエンドでのインタラクティブグラフ
+
+### AI・API統合
+- **google-generativeai 0.8.5**: Gemini API統合
+- **tavily-python 0.7.8**: Web検索API統合
+
+### フロントエンド
+- **HTML/CSS/JavaScript**: 基本的なWeb技術
+- **jQuery**: JavaScript ライブラリ
+- **Chart.js**: グラフ描画ライブラリ
+
+## 🔧 セットアップ
+
+### 1. 前提条件
+- Python 3.8以上
+- PostgreSQL
+- Git
+
+### 2. リポジトリのクローン
 ```bash
-# .env ファイル
-GOOGLE_API_KEY=your_google_gemini_api_key
-TAVILY_API_KEY=your_tavily_api_key
+git clone <repository-url>
+cd ai_agent
 ```
 
-### 2. APIキー取得方法
-
-#### Google Gemini API
-1. [Google AI Studio](https://makersuite.google.com/app/apikey)にアクセス
-2. APIキーを生成
-3. `.env`ファイルの`GOOGLE_API_KEY`に設定
-
-#### Tavily API
-1. [Tavily](https://tavily.com/)でアカウント作成
-2. APIキーを取得
-3. `.env`ファイルの`TAVILY_API_KEY`に設定
-
-### 3. 仮想環境作成（推奨）
-
+### 3. 仮想環境の作成・有効化
 ```bash
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# または
-venv\Scripts\activate     # Windows
+
+# Linux/Mac
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
 ```
 
-### 4. 依存関係インストール
-
+### 4. 依存関係のインストール
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. データベース設定
+### 5. 環境変数の設定
+`.env`ファイルを作成し、以下の環境変数を設定：
 
-```bash
-python manage.py migrate
+```env
+# Django設定
+DJANGO_SECRET_KEY=your-secret-key-here
+DEBUG=True
+
+# データベース設定
+DB_NAME=your_db_name
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_HOST=localhost
+DB_PORT=5432
+
+# AI API設定
+GEMINI_API_KEY=your-gemini-api-key
+TAVILY_API_KEY=your-tavily-api-key
+
+# AI分析デバッグモード
+AI_DEBUG_MODE=True
 ```
 
-### 6. サーバー起動
+### 6. データベースのセットアップ
+```bash
+python manage.py migrate
+python manage.py createsuperuser  # 管理者ユーザー作成
+```
 
+### 7. 開発サーバーの起動
 ```bash
 python manage.py runserver
 ```
 
-## 重要なセキュリティ情報
+アプリケーションは `http://localhost:8000` でアクセス可能です。
 
-- `.env`ファイルは**絶対にgitにコミットしない**
-- APIキーを直接コードに書かない
-- 本番環境では環境変数で設定する
+## 📖 使用方法
 
-## 技術スタック
+### 基本的な使用フロー
 
-- **Backend**: Django, Python
-- **AI/ML**: scikit-learn, Google Gemini API
-- **Web Search**: Tavily API
-- **Database**: PostgreSQL
-- **Frontend**: HTML, CSS, JavaScript
+1. **ユーザー登録・ログイン**
+   - 新規ユーザー登録または既存アカウントでログイン
+
+2. **企業検索**
+   - ホーム画面でキーワード検索
+   - 企業名またはEDINETコードで検索可能
+
+3. **企業詳細分析**
+   - 企業を選択して詳細ページにアクセス
+   - 財務データ、予測分析、ポジショニング分析を確認
+
+4. **AI分析の活用**
+   - 自動生成されるAI分析レポートを参考に企業を評価
+   - 競合他社との比較分析
+
+## 🔑 API設定
+
+### Google Gemini API
+1. [Google AI Studio](https://aistudio.google.com/)でAPIキーを取得
+2. `.env`ファイルに`GEMINI_API_KEY`を設定
+
+### Tavily Search API
+1. [Tavily](https://tavily.com/)でアカウント作成
+2. APIキーを取得し、`.env`ファイルに`TAVILY_API_KEY`を設定
+
+## 📁 プロジェクト構成
+
+```
+ai_agent/
+├── config/                     # Django設定
+│   ├── settings.py             # メイン設定ファイル
+│   ├── urls.py                 # ルートURLconf
+│   ├── wsgi.py                 # WSGI設定
+│   └── asgi.py                 # ASGI設定
+├── core/                       # メインアプリケーション
+│   ├── src/                    # 機械学習・分析モジュール
+│   │   ├── ai_analysis.py      # AI分析機能
+│   │   ├── ml_analytics.py     # 機械学習・予測分析
+│   │   └── financial_utils.py  # 財務指標計算
+│   ├── models.py               # データモデル定義
+│   ├── views.py                # ビュー関数
+│   ├── urls.py                 # URLルーティング
+│   ├── forms.py                # フォーム定義
+│   ├── admin.py                # 管理画面設定
+│   ├── templates/              # HTMLテンプレート
+│   │   ├── financial/          # 金融分析テンプレート
+│   │   └── registration/       # ユーザー認証テンプレート
+│   ├── static/                 # 静的ファイル
+│   │   └── core/
+│   │       ├── css/            # スタイルシート
+│   │       └── js/             # JavaScript
+│   ├── migrations/             # データベースマイグレーション
+│   └── templatetags/           # カスタムテンプレートタグ
+├── arima_cache/                # ARIMA予測結果キャッシュ
+├── clustering_cache/           # クラスタリング結果キャッシュ
+├── tests/                      # テストファイル
+│   └── ml_evaluation/          # 機械学習評価テスト
+├── requirements.txt            # Python依存関係
+├── manage.py                   # Django管理コマンド
+├── CLAUDE.md                   # プロジェクト詳細仕様
+└── README.md                   # このファイル
+```
+
+## 🤖 機械学習手法
+
+### 1. 成長性予測（ARIMAモデル）
+- **手法**: ARIMA時系列分析
+- **予測期間**: 3年間
+- **シナリオ**: 楽観・現状・悲観の3パターン
+- **評価指標**: MAE、RMSE、MAPE
+
+### 2. ポジショニング分析
+- **次元削減**: UMAP（n_components=2）
+- **クラスタリング**: HDBSCAN（密度ベース）
+- **特徴量**: 純資産、総資産、純利益、研究開発費、従業員数
+- **前処理**: StandardScaler標準化
+
+### 3. AI分析統合
+- **LLM**: Google Gemini Pro
+- **Web検索**: Tavily API
+- **カスタマイズ**: IT業界志望学生向け分析
+
+## 🧪 開発・テスト
+
+### テストの実行
+```bash
+# Django単体テスト
+python manage.py test
+
+# 機械学習評価テスト
+python -m pytest tests/ml_evaluation/
+
+# 特定のテスト実行
+python test_evaluation.py
+```
+
+### パフォーマンス評価
+```bash
+# 機械学習手法の性能評価
+python test_performance_output.py
+```
+
+### デバッグモード
+環境変数 `AI_DEBUG_MODE=True` を設定することで、AI分析の詳細ログが出力されます。
+
+### キャッシュ管理
+- ARIMAモデルの予測結果は`arima_cache/`にキャッシュされます
+- クラスタリング結果は`clustering_cache/`にキャッシュされます
+- キャッシュクリア: 各ディレクトリ内のファイルを削除
+
+## 📊 主要データモデル
+
+### FinancialData
+- 企業の財務データを格納
+- フィールド: 企業名、EDINETコード、売上高、利益、資産等
+
+### FinancialDataValidated
+- 検証済み財務データ
+- 機械学習分析で使用
+
+### UserProfile
+- ユーザープロファイル情報
+- キャリア志向、興味分野等
+
+## 🔗 関連ドキュメント
+
+- [CLAUDE.md](CLAUDE.md) - 詳細な機械学習手法分析
+- [spec.md](spec.md) - システム仕様書
+- [MACHINE_LEARNING_TEST_GUIDE.md](MACHINE_LEARNING_TEST_GUIDE.md) - ML手法評価ガイド
+
+## 🤝 コントリビューション
+
+1. フォークしてください
+2. フィーチャーブランチを作成 (`git checkout -b feature/AmazingFeature`)
+3. 変更をコミット (`git commit -m 'Add some AmazingFeature'`)
+4. ブランチにプッシュ (`git push origin feature/AmazingFeature`)
+5. プルリクエストを作成
+
+## 📄 ライセンス
+
+このプロジェクトは教育目的で作成されています。
+
+## 📞 サポート
+
+問題や質問がある場合は、Issueを作成してください。
+
+## 🎓 教育目的での使用について
+
+このシステムは情報系学生の学習・就職活動支援を目的として開発されています。実際の投資判断や企業評価に使用する際は、他の情報源と併せて総合的に判断してください。
