@@ -44,6 +44,12 @@ tavily-python==0.7.8                # Web検索API統合
 requests==2.31.0                    # HTTPリクエスト（API呼び出し用）
 
 # =============================================================================
+# EDINET DATA FETCHER
+# =============================================================================
+beautifulsoup4>=4.12.0              # XBRL解析用HTMLパース
+lxml>=4.9.0                         # XBRL解析用XMLパース
+
+# =============================================================================
 # UTILITY & SUPPORT
 # =============================================================================
 Pillow>=10.0.0                      # 画像処理（matplotlib等で必要）
@@ -71,6 +77,7 @@ django-environ>=0.11.0              # 環境設定管理
 #    - matplotlib (可視化)
 #    - Gemini API (AI分析)
 #    - Tavily API (Web検索)
+#    - EDINET-DATAFETCHER (財務データ取得)
 #
 # 2. インストール方法:
 #    pip install -r requirements.txt
@@ -84,3 +91,8 @@ django-environ>=0.11.0              # 環境設定管理
 #    - GEMINI_API_KEY
 #    - TAVILY_API_KEY
 #    - DJANGO_SECRET_KEY
+#    - EDINET_API_KEY (データベース構築時)
+#
+# 5. データベース構築:
+#    EDINET-DATAFETCHERを使用してEDINET APIから財務データを取得
+#    詳細は README.md の「データベースの構築」セクションを参照

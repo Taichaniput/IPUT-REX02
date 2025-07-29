@@ -7,6 +7,7 @@ IT業界志望の情報系学生を対象とした包括的企業分析プラッ
 - [システム概要](#システム概要)
 - [主要機能](#主要機能)
 - [技術スタック](#技術スタック)
+- [データベースの構築](#データベースの構築)
 - [セットアップ](#セットアップ)
 - [使用方法](#使用方法)
 - [API設定](#api設定)
@@ -91,6 +92,109 @@ IT業界志望の情報系学生を対象とした包括的企業分析プラッ
 - **HTML/CSS/JavaScript**: 基本的なWeb技術
 - **jQuery**: JavaScript ライブラリ
 - **Chart.js**: グラフ描画ライブラリ
+
+## 💾 データベースの構築
+
+このシステムで使用する財務データは、付属の**EDINET-DATAFETCHER**を使用してEDINET API（金融庁の電子開示システム）から取得・構築します。
+
+### EDINET-DATAFETCHERとは
+
+EDINET-DATAFETCHERは、上場企業の有価証券報告書から財務データを自動取得・解析するPythonアプリケーションです。
+
+#### 主な機能
+- **EDINET API連携**: 金融庁のEDINET APIから書類メタデータを取得
+- **XBRL解析**: 有価証券報告書のXBRLファイルから財務指標を抽出
+- **データ検証**: 不整合データの検出・修正
+- **PostgreSQL統合**: 解析結果をデータベースに格納
+
+#### データ取得フロー
+1. **書類メタデータ取得**: 指定期間の有価証券報告書一覧を取得
+2. **XBRLダウンロード**: 個別の書類ファイルをダウンロード
+3. **財務データ解析**: XBRL から売上高、利益、資産等を抽出
+4. **データベース保存**: PostgreSQL に保存（生データ・検証済みデータ）
+
+### EDINET-DATAFETCHERのセットアップ
+
+#### 1. EDINET API キーの取得
+1. [EDINET API](https://disclosure.edinet-fsa.go.jp/E01EW/BLMainController.jsp?TID=3)にアクセス
+2. 利用者登録を行い、APIキーを取得
+
+#### 2. 設定ファイルの作成
+`EDINET-DATAFATCHER/config.py`を作成：
+```python
+# EDINET APIキー
+EDINET_API_KEY = "YOUR_API_KEY_HERE"
+
+# データベース設定
+DB_CONFIG = {
+    "host": "localhost",
+    "database": "your_db_name",
+    "user": "your_db_user", 
+    "password": "your_db_password",
+    "port": 5432
+}
+```
+
+#### 3. 対象企業リストの準備
+`EDINET-DATAFATCHER/out_dic.csv`に証券コードとEDINETコードを記載：
+```csv
+証券コード,EDINETコード
+7203,E02144
+6758,E01706
+9984,E04588
+```
+
+#### 4. データベース構築の実行
+
+**対話型CLI（推奨）:**
+```bash
+cd EDINET-DATAFATCHER
+python cli.py
+```
+
+メニューから順次実行：
+1. **データベースのセットアップ** - テーブル作成
+2. **書類メタデータの取得** - 企業の提出書類一覧を取得（例：過去30日分）
+3. **XBRLデータの解析** - 財務データを抽出・保存（例：100件）
+4. **データ品質統計の確認** - 収集状況を確認
+
+**コマンドライン:**
+```bash
+cd EDINET-DATAFATCHER
+
+# データベース初期化
+python db_setup.py
+
+# 過去30日分の書類を取得
+python pipeline.py fetch --days 30
+
+# 100件の書類を解析
+python pipeline.py parse --limit 100
+
+# データ確認
+python test_output.py
+```
+
+#### 5. データベース構成
+
+構築されるテーブル：
+- **edinet_documents**: 書類メタデータ（提出日、企業名、書類種別等）
+- **financial_data**: 財務データ生データ（売上高、利益、資産等）
+- **financial_data_validated**: 検証済み財務データ（推定値・補完値含む）
+
+### データ更新の運用
+
+#### 日次更新（推奨）
+```bash
+cd EDINET-DATAFATCHER
+python pipeline.py fetch --days 1    # 前日分の書類取得
+python pipeline.py parse --limit 20  # 新規書類の解析
+```
+
+#### 注意事項
+- EDINET APIは1秒に1リクエストの制限があります
+- 大量データ取得には時間がかかります（100件で約10分）
+- データ検証モードでは信頼度の低いデータは除外されます
 
 ## 🔧 セットアップ
 
@@ -214,6 +318,14 @@ ai_agent/
 │   │       └── js/             # JavaScript
 │   ├── migrations/             # データベースマイグレーション
 │   └── templatetags/           # カスタムテンプレートタグ
+├── EDINET-DATAFATCHER/         # 財務データ取得システム
+│   ├── cli.py                  # 対話型CLI
+│   ├── pipeline.py             # データ取得・解析パイプライン
+│   ├── db_setup.py             # データベース初期化
+│   ├── xbrl_parser.py          # XBRL解析エンジン
+│   ├── config.py               # EDINET API設定
+│   ├── out_dic.csv             # 対象企業リスト
+│   └── README.md               # EDINET-DATAFETCHER詳細説明
 ├── arima_cache/                # ARIMA予測結果キャッシュ
 ├── clustering_cache/           # クラスタリング結果キャッシュ
 ├── tests/                      # テストファイル
